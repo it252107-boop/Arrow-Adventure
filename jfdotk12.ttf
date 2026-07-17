@@ -1,0 +1,187 @@
+package com.example.arrowadventureapp;
+
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.graphics.Color;
+import android.os.Bundle;
+import android.view.View;
+import android.widget.Button;
+import android.widget.TextView;
+import android.widget.Toast;
+import androidx.activity.EdgeToEdge;
+import androidx.activity.OnBackPressedCallback;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.app.AppCompatDelegate;
+import android.content.res.Configuration;
+
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
+
+/**
+ * 設定画面のアクティビティ。
+ * ダークモードの切り替え、文字サイズ・文字色の変更、プライバシーポリシーへの遷移を行います。
+ * 設定された内容は SharedPreferences に保存され、他の画面（MainActivityなど）で読み込まれます。
+ */
+public class Settei extends AppCompatActivity {
+
+    private TextView previewText; // 設定変更をすぐに確認するための「プレビュー用テキスト」
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        // 画面を端まで広げる（没入感を高める設定）
+        EdgeToEdge.enable(this);
+        setContentView(R.layout.activity_settei);
+
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.settei), (v, insets) -> {
+            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
+            return insets;
+        });
+
+        // ==========================================
+        // 1. 戻るボタンの制御
+        // ==========================================
+        // スマホ本体の「戻るボタン」を完全に無効化します。
+        // ユーザーには画面内の「戻るボタン」を確実に押してもらうための設計です。
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                // 何もしない（入力を消費して無視する）
+            }
+        });
+
+        // ==========================================
+        // 2. 画面部品（View）の取得
+        // ==========================================
+        previewText = findViewById(R.id.text_preview);
+        Button lightButton = findViewById(R.id.dark); // ダークモード切替ボタン
+        View myLine = findViewById(R.id.myLine);      // 装飾用の線
+
+        // ==========================================
+        // 3. ボタン動作の設定
+        // ==========================================
+
+        // 画面内の「戻る」ボタン (ここだけが唯一の出口)
+        findViewById(R.id.return2).setOnClickListener(view -> finish());
+
+        // プライバシーポリシー画面への移動
+        findViewById(R.id.btn_privacy).setOnClickListener(view -> {
+            Intent intent = new Intent(Settei.this, PrivacyPolicyActivity.class);
+            startActivity(intent);
+        });
+
+        // ==========================================
+        // 4. 設定ロジックの実行
+        // ==========================================
+        // ダークモードの設定（ボタンの見た目や動作をセット）
+        setupDarkMode(lightButton, myLine);
+
+        // 文字サイズ・色の設定（保存データの読み込みとボタン設定）
+        setupAppearanceSettings();
+    }
+
+    /**
+     * ダークモードの切り替え処理をまとめたメソッド
+     * 現在のモードを判定し、ボタンの表示を変えたり、切り替え動作を設定します。
+     */
+    private void setupDarkMode(Button btn, View line) {
+        if (btn == null) return;
+
+        // Simplify Check: Check configuration directly which reflects current state
+        int currentNightMode = getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
+        boolean isNight = (currentNightMode == Configuration.UI_MODE_NIGHT_YES);
+
+        // --- 現在のモードに合わせて見た目をセット ---
+        if (isNight) {
+            if (line != null) line.setBackgroundColor(Color.WHITE);
+            btn.setText("ライトモードに切り替え");
+        } else {
+            if (line != null) line.setBackgroundColor(Color.DKGRAY);
+            btn.setText("ダークモードに切り替え");
+        }
+
+        btn.setOnClickListener(v -> {
+            int nextMode = isNight ? AppCompatDelegate.MODE_NIGHT_NO : AppCompatDelegate.MODE_NIGHT_YES;
+            AppCompatDelegate.setDefaultNightMode(nextMode);
+            recreate();
+        });
+    }
+
+    /**
+     * 文字サイズと色の設定処理をまとめたメソッド
+     * SharedPreferencesを使ってデータを保存・読み込みします。
+     */
+    private void setupAppearanceSettings() {
+        SharedPreferences prefs = getSharedPreferences("AppSettings", MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+
+        if (previewText != null) {
+            int savedSize = prefs.getInt("textSize", 50);
+
+            // Determine default color based on current UI mode directly
+            // Simplified logic: Check mode once
+            int currentNightMode = getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
+            boolean isNight = (currentNightMode == Configuration.UI_MODE_NIGHT_YES);
+            
+            int defaultColor = isNight ? Color.parseColor("#FFFFFF") : Color.parseColor("#000000");
+
+            // 保存された色があればそれを使い、なければ上で決めた defaultColor を使う
+            int savedColor = prefs.getInt("textColor", defaultColor);
+
+            previewText.setTextSize(savedSize);
+            previewText.setTextColor(savedColor);
+        }
+
+        // --- 文字サイズボタンの設定 ---
+        // サイズごとに updateTextSize メソッドを呼び出す
+        findViewById(R.id.btn_size_small).setOnClickListener(v -> updateTextSize(30, editor));
+        findViewById(R.id.btn_size_medium).setOnClickListener(v -> updateTextSize(50, editor));
+        findViewById(R.id.btn_size_large).setOnClickListener(v -> updateTextSize(70, editor));
+
+        // --- 文字色ボタンの設定 ---
+        // setupColorButton メソッドを使って、たくさんの色ボタンを簡潔に設定
+        setupColorButton(R.id.btn_color_1, Color.parseColor("#FFFFFF"), editor, "白");
+        setupColorButton(R.id.btn_color_2, Color.parseColor("#000000"), editor, "黒");
+        setupColorButton(R.id.btn_color_3, Color.parseColor("#FF0000"), editor, "赤");
+        setupColorButton(R.id.btn_color_4, Color.parseColor("#0000FF"), editor, "青");
+        setupColorButton(R.id.btn_color_5, Color.parseColor("#00FF00"), editor, "緑");
+        setupColorButton(R.id.btn_color_6, Color.parseColor("#FFFF00"), editor, "黄");
+        setupColorButton(R.id.btn_color_7, Color.parseColor("#00FFFF"), editor, "シアン");
+    }
+
+    /**
+     * 【ヘルパーメソッド】文字サイズを変更して保存する
+     */
+    private void updateTextSize(int size, SharedPreferences.Editor editor) {
+        editor.putInt("textSize", size); // データをセット
+        editor.apply();                  // 保存実行！
+
+        // プレビューにも即座に反映
+        if (previewText != null) {
+            previewText.setTextSize(size);
+        }
+    }
+
+    /**
+     * 【ヘルパーメソッド】文字色を変更して保存する
+     * たくさんの色ボタンの処理を共通化して、コードを見やすくしています。
+     */
+    private void setupColorButton(int btnId, int colorCode, SharedPreferences.Editor editor, String colorName) {
+        View btn = findViewById(btnId);
+        if (btn == null) return;
+
+        btn.setOnClickListener(v -> {
+            editor.putInt("textColor", colorCode); // 色コードをセット
+            editor.apply();                        // 保存実行！
+
+            // プレビューの色もその場で変える
+            if (previewText != null) {
+                previewText.setTextColor(colorCode);
+            }
+            // ユーザーに「変わったよ！」と伝える
+            Toast.makeText(this, "色：" + colorName, Toast.LENGTH_SHORT).show();
+        });
+    }
+}

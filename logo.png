@@ -1,0 +1,1352 @@
+package com.example.arrowadventureapp;
+
+import com.google.android.gms.location.Priority;
+import com.google.firebase.firestore.FirebaseFirestore;
+import com.google.firebase.firestore.QueryDocumentSnapshot;
+import android.Manifest;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.location.Location;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.VibrationEffect;
+import android.provider.Settings;
+import android.view.View;
+import android.view.animation.Animation;
+import android.view.animation.RotateAnimation;
+import android.widget.Button;
+import android.widget.ImageView;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import androidx.activity.EdgeToEdge;
+import androidx.activity.OnBackPressedCallback;
+import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
+
+import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationCallback;
+import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationResult;
+import com.google.android.gms.location.LocationServices;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
+import android.content.Context;
+import android.os.Vibrator;
+import android.graphics.Color;
+
+public class Navi extends AppCompatActivity implements SensorEventListener {
+
+    // SharedPreferences for storing cleared quest IDs locally (user-specific)
+    private static final String PREFS_NAME = "quest_prefs";
+    private static final String KEY_CLEARED_QUESTS = "cleared_quest_ids";
+
+    private static final int REQ_LOCATION = 2001;
+    private double destLat = Double.NaN;
+    private double destLng = Double.NaN;
+
+    private TextView textDistance;
+    private TextView textStatusConfusion; // 磁気センサー異常時の表示
+    private ImageView directionArrow;
+    private Button buttonStop;
+    private ImageView settingsIcon; // 歯車アイコン
+    private FusedLocationProviderClient fusedLocationClient;
+
+    private final java.util.List<String> ignoredQuestIds = new java.util.ArrayList<>();
+
+    // sensors
+    private SensorManager sensorManager;
+    private Sensor rotationVectorSensor;
+    private Sensor accelSensor;
+    private Sensor magnetSensor;
+    private float[] accelValues = null;
+    private float[] magnetValues = null;
+
+    // latest known location
+    private Location lastLocation = null;
+
+    // location updates
+    private LocationCallback locationCallback;
+
+    // navigation state flag
+    private boolean isNavigating = true;
+
+    private Vibrator vibrator;
+
+    private float currentDegree = 0f;
+
+    private double originalDestLat;
+    private double originalDestLng;
+    private boolean isDetourMode = false;
+
+    private boolean isQuestDialogShown = false;
+
+    private final java.util.List<Quest> questList = new java.util.ArrayList<>();
+
+    private Quest currentQuest = null;
+    private final int COLOR_NORMAL_NAV = Color.parseColor("#1f44ff");      // 通常時の水色
+    private final int COLOR_NORMAL_ALERT = Color.parseColor("#ff3333");// 通常時の赤色
+    private final int COLOR_QUEST_MATCH = Color.parseColor("#ffd700");
+    private final int COLOR_QUEST_MODE = Color.parseColor("#00ffd9");       // クエストモードのマゼンタ ★これです
+
+    private long lastVibrationTime = 0;
+
+    private long lastUiUpdateTime = 0;      // UI更新の間引き用
+    private boolean isArrivalProcessed = false; // 到着処理の連打防止用
+
+    // 到着判定の誤検知防止用（移動平均）
+    private final java.util.LinkedList<Float> distanceHistory = new java.util.LinkedList<>();
+    private static final int DISTANCE_HISTORY_SIZE = 5; // 直近5回の平均をとる
+
+    // バッテリーセーバー用
+    private long lastMovementTime = System.currentTimeMillis();
+    private boolean isLowPowerMode = false;
+    private static final long STATIONARY_TIMEOUT = 10000; // 10秒静止で省エネモードへ
+    // private SharedPreferences questPrefs; // Removed as unused
+
+
+
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        // ==========================================
+        // 1. 画面表示の基本設定
+        // ==========================================
+        // 画面をスマホの端まで広げて、没入感を高めます
+        EdgeToEdge.enable(this);
+        setContentView(R.layout.activity_navi);
+
+        // ==========================================
+        // 5. 画面パーツ（View）の紐付け (Moved here to prevent NPE)
+        // ==========================================
+        textDistance = findViewById(R.id.text_distance);
+        textStatusConfusion = findViewById(R.id.text_status_confusion);
+        directionArrow = findViewById(R.id.direction_arrow);
+        buttonStop = findViewById(R.id.button_stop);
+        settingsIcon = findViewById(R.id.settings_icon);
+
+        // ==========================================
+        // 2. 基本機能の初期化
+        // ==========================================
+        // バイブレーション機能の準備（クエスト発生時などに震えます）
+        vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+
+        // RPGデータの保存用Pref
+        // questPrefs = getSharedPreferences("QuestData", MODE_PRIVATE); // Removed as unused
+
+        // クエストデータを取得するためにデータベースを準備
+        FirebaseFirestore db = FirebaseFirestore.getInstance();
+
+        // スマホの「戻るボタン」を無効化（ナビ中に誤って終了しないようにする）
+        getOnBackPressedDispatcher().addCallback(new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                // 何もしない（入力を消費して無視する）
+            }
+        });
+
+        // ==========================================
+        // 3. UIの余白調整
+        // ==========================================
+        // ステータスバー（時計など）やナビゲーションバーと、ボタンが重ならないように調整
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
+            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
+            return insets;
+        });
+
+        // ==========================================
+        // 4. クエストデータの読み込みと復元処理
+        // ==========================================
+        // Firebaseからクエスト一覧をダウンロードします（非同期処理）
+        db.collection("quests")
+                .get()
+                .addOnCompleteListener(task -> {
+                    if (task.isSuccessful()) {
+                        questList.clear(); // リストを一度きれいにする
+
+                        // もし画面回転などで再起動した場合、中断前にやっていたクエストIDを取り出す
+                        String savedId = (savedInstanceState != null) ?
+                                savedInstanceState.getString("currentQuestId") : null;
+
+                        // 取得した全クエストをリストに追加
+                        for (QueryDocumentSnapshot document : task.getResult()) {
+                            Quest q = document.toObject(Quest.class);
+                            q.id = document.getId(); // ドキュメントIDも保持
+                            questList.add(q);
+
+                            android.util.Log.d("QuestCheck", "Name: " + q.name + ", Lat: " + q.latitude + ", Lng: " + q.longitude);
+
+                            // 再起動前に挑戦中だったクエストがあれば、現在のクエストとして復帰させる
+                            if (q.id.equals(savedId)) {
+                                currentQuest = q;
+                                // 寄り道モード中なら、矢印の色もクエスト用に変更
+                                if (isDetourMode) {
+                                    directionArrow.setColorFilter(COLOR_QUEST_MODE);
+                                }
+                            }
+                        }
+                        
+                        // 修正: 4. Check trigger after loop
+                        if (lastLocation != null) {
+                            checkQuestTrigger(lastLocation);
+                        }
+                    } else {
+                        Toast.makeText(this, "データ取得失敗", Toast.LENGTH_SHORT).show();
+                    }
+                });
+
+        // Moved to top of onCreate to prevent NPE
+
+        // ==========================================
+        // 6. 位置情報クライアントの準備
+        // ==========================================
+        // Googleの機能を使って現在地を取得する準備
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
+
+        // ==========================================
+        // 7. 前の画面から渡された目的地情報の受け取り
+        // ==========================================
+        // Caution画面や履歴画面から送られてきた「目的地の緯度経度」を受け取ります
+        if (getIntent() != null) {
+            destLat = getIntent().getDoubleExtra("dest_lat", Double.NaN);
+            destLng = getIntent().getDoubleExtra("dest_lng", Double.NaN);
+        }
+
+        // ==========================================
+        // 8. 画面再起動時の状態復元（重要！）
+        // ==========================================
+        // 画面回転などでActivityが作り直された時、一時保存しておいたデータを元に戻します
+        if (savedInstanceState != null) {
+            isDetourMode = savedInstanceState.getBoolean("isDetourMode");
+            isQuestDialogShown = savedInstanceState.getBoolean("isQuestDialogShown");
+
+            // 目的地座標の復元
+            if (savedInstanceState.containsKey("destLat")) {
+                destLat = savedInstanceState.getDouble("destLat");
+                destLng = savedInstanceState.getDouble("destLng");
+            }
+            originalDestLat = savedInstanceState.getDouble("originalDestLat");
+            originalDestLng = savedInstanceState.getDouble("originalDestLng");
+
+            // クエストのクリア状態を復旧
+            if (currentQuest != null && savedInstanceState.containsKey("questCleared")) {
+                try {
+                    currentQuest.isCleared = savedInstanceState.getBoolean("questCleared");
+                } catch (Exception e) { /* ignore */ }
+            }
+
+            // 寄り道モードなら矢印をマゼンタに設定（見た目の復元）
+            if (isDetourMode) {
+                try {
+                    directionArrow.setColorFilter(COLOR_QUEST_MODE);
+                } catch (Exception ignored) { /* ignore */ }
+            }
+        }
+
+        // ==========================================
+        // 9. 目的地の有効チェック
+        // ==========================================
+        // 座標が正しく受け取れていない場合の安全装置
+        if (Double.isNaN(destLat) || Double.isNaN(destLng)) {
+            Toast.makeText(this, "目的地が指定されていません", Toast.LENGTH_SHORT).show();
+            textDistance.setText("-- m");
+            directionArrow.setRotation(0f);
+        }
+
+        // ==========================================
+        // 10. 各種センサー（回転・加速度・磁気）の準備
+        // ==========================================
+        // 方角を知るためのセンサー類をシステムから取得
+        sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
+        if (sensorManager != null) {
+            rotationVectorSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
+            accelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+            magnetSensor = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
+        }
+
+        // ==========================================
+        // 11. 位置情報が更新された時のルール定義
+        // ==========================================
+        // 現在地が変わるたびに呼び出される処理（コールバック）を作ります
+        locationCallback = new LocationCallback() {
+            @Override
+            public void onLocationResult(LocationResult locationResult) {
+                if (locationResult == null) return;
+                for (Location location : locationResult.getLocations()) {
+                    lastLocation = location;
+                    checkQuestTrigger(location); // 近くにクエストがないか確認
+                    updateDistanceIfPossible();  // 目的地までの距離・矢印の向きを更新
+                }
+            }
+        };
+
+        // ==========================================
+        // 12. ボタン類のクリックイベント設定
+        // ==========================================
+        if (buttonStop != null) {
+            buttonStop.setOnClickListener(v -> showStopConfirmDialog()); // 終了確認
+        }
+        if (settingsIcon != null) {
+            settingsIcon.setOnClickListener(v -> showSettingsDialog()); // 設定ダイアログ
+        }
+
+        // ==========================================
+        // 13. 最終チェック：ナビ開始！
+        // ==========================================
+        // 権限があるか確認し、あればセンサーと位置情報の更新をスタートします
+        // 権限があるか確認し、あればセンサーと位置情報の更新をスタートします
+        checkAndRequestPermission();
+    }
+
+    //設定ダイアログに移動するためのコード
+    private void showSettingsDialog() {
+        Intent intent = new Intent(Navi.this, Settei.class);
+        startActivity(intent);
+    }
+
+    // 確認ダイアログ
+    private void showStopConfirmDialog() {
+        new AlertDialog.Builder(this)
+                .setTitle("中断の確認")
+                .setMessage("冒険を中断しますか？")
+                .setPositiveButton("はい", (dialog, which) -> {
+                    // 中断の実際の処理はここにある stopNavigation() を呼ぶ（現在は枠）
+                    stopNavigation();
+                })
+                .setNegativeButton("いいえ", null)
+                .show();
+    }
+
+    // 中断時に呼ばれる処理の枠（ここに中断時の具体的処理を実装する）
+    /**
+     * ナビゲーションを安全に停止し、メイン画面に戻るための処理
+     */
+    private void stopNavigation() {
+        // 1. ナビゲーション状態フラグをオフにする
+        // アプリ内で「今ナビ中かどうか」を判断するスイッチを切ります。
+        // これにより、画面描画などのループ処理を安全に停止させます。
+        isNavigating = false;
+
+        // 2. センサーの登録解除（★重要：電池の節約！）
+        // コンパスや加速度センサーの監視を停止します。
+        // これを忘れると、画面を閉じた後も裏でセンサーが動き続け、電池が激しく消耗してしまいます。
+        if (sensorManager != null) {
+            sensorManager.unregisterListener(this);
+        }
+
+        // 3. 位置情報の更新（GPS）を停止
+        // Googleのシステムに対して「もう位置情報は不要です」と伝えます。
+        // これもバッテリー消費を抑え、スマホの負荷を下げるために必須の処理です。
+        try {
+            fusedLocationClient.removeLocationUpdates(locationCallback);
+        } catch (SecurityException | IllegalArgumentException e) {
+            // 万が一、停止時にエラー（権限不足など）が出てもアプリが落ちないようにします
+            e.printStackTrace();
+        }
+
+        // 4. ユーザーへの通知
+        // 画面の下に短いメッセージを表示して、処理が完了したことを伝えます。
+        Toast.makeText(this, "冒険を中断しました", Toast.LENGTH_SHORT).show();
+
+        // 5. 画面の移動と終了処理
+        // メイン画面（MainActivity）に戻るためのIntentを作成して移動します。
+        Intent intent = new Intent(Navi.this, MainActivity.class);
+        startActivity(intent);
+
+        // 現在の画面（Navi Activity）をメモリから完全に消去（終了）します。
+        // これを実行することで、「戻るボタン」を押してもナビ画面に戻れないようにします（一方通行）。
+        finish();
+    }
+
+
+    // --- 以下は既存の権限・位置・センサロジック（省略せず保持） ---
+
+    /**
+     * 位置情報の権限をチェックし、必要に応じてユーザーに許可を求めるメソッド。
+     * Android 6.0以上では、アプリ実行中にユーザーに許可をもらう必要があります（Runtime Permission）。
+     */
+    private void checkAndRequestPermission() {
+        // ==========================================
+        // 1. 位置情報の権限をチェック
+        // ==========================================
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            startLocationAndSensors();
+        } else {
+            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, REQ_LOCATION);
+        }
+    }
+
+    /**
+     * ユーザーが権限許可ダイアログに対して応答したときに自動で呼ばれる
+     */
+    /**
+     * ユーザーが権限のダイアログで「許可」または「拒否」を選んだ後に呼ばれる結果受け取りメソッド
+     */
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        // ==========================================
+        // 1. どの要求に対する返事かをチェック
+        // ==========================================
+        // checkAndRequestLocationPermission で送った「REQ_LOCATION」という番号（リクエストコード）と一致するか確認します。
+        // これにより、他の権限リクエストと混ざらないようにしています。
+        if (requestCode == REQ_LOCATION) {
+
+            // ==========================================
+            // 2. ユーザーが「許可」を選んだ場合
+            // ==========================================
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                // 無事に権限が得られたので、保留にしていた「位置情報とセンサーの開始処理」を実行します
+                startLocationAndSensors();
+            }
+            // ==========================================
+            // 3. ユーザーが「拒否」を選んだ場合
+            // ==========================================
+            else {
+                // ここが少し複雑ですが重要なポイントです。
+                // 「今後表示しない」にチェックを入れて拒否されたのか、単に「今回だけ拒否」されたのかを判定します。
+                // 拒否された直後に shouldShowRequestPermissionRationale が false を返す場合、
+                // それは「もう二度と聞くな（今後表示しない）」という意味になります。
+                // それは「もう二度と聞くな（今後表示しない）」という意味になります。
+                boolean showRationale = ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.ACCESS_FINE_LOCATION);
+
+                // 部分的な許可（例：位置はOKだが歩数はNG）の場合もあるので、今回は簡易的に
+                // 「位置情報さえあればナビは開始する」という方針にします
+                if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                    startLocationAndSensors();
+                    return;
+                }
+
+                if (!showRationale) {
+                    // 【深刻な拒否（完全拒否）】
+                    // システム側でブロックされているため、アプリから許可ダイアログを出すことが二度とできません。
+                    // そのため、ユーザーの手でスマホの「設定画面」を開いて許可してもらうよう誘導します。
+                    new AlertDialog.Builder(this)
+                            .setTitle("権限が必要です")
+                            .setMessage("位置情報の権限が必要です。アプリ設定画面で権限を許可してください。")
+                            .setPositiveButton("設定を開く", (dialog, which) -> {
+                                // スマホの「アプリ情報（設定）」画面を直接開くための特別な命令（Intent）
+                                Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                        Uri.fromParts("package", getPackageName(), null));
+                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                startActivity(intent);
+                            })
+                            .setNegativeButton("閉じる", null)
+                            .show();
+                } else {
+                    // 【通常の拒否】
+                    // 「今後表示しない」は選ばれていないので、次回起動時にまた聞くチャンスがあります。
+                    // ここではしつこくせず、トーストで警告を出すだけに留めます。
+                    Toast.makeText(this, "位置情報の権限が必要です", Toast.LENGTH_SHORT).show();
+                }
+            }
+        } else {
+            // 4. 他の権限（もしあれば）の結果は、親クラスに任せる
+            super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        }
+    }
+
+    // 開始: 位置取得とセンサ登録
+    /**
+     * 位置情報の取得と、方位を測るセンサーの監視を開始するメソッド。
+     * 権限チェック（checkAndRequestLocationPermission）をパスした後に呼ばれます。
+     */
+    private void startLocationAndSensors() {
+
+        // ==========================================
+        // 1. 「最後に確認された位置」をサッと取得
+        // ==========================================
+        // GPS測位には数秒〜数十秒かかることがあるため、
+        // まずはスマホが覚えている「最後に確認した位置（キャッシュ）」を使って、画面を即座に表示させます。
+        try {
+            fusedLocationClient.getLastLocation().addOnSuccessListener(location -> {
+                if (location != null) {
+                    lastLocation = location;      // 現在地として保存
+                    updateDistanceIfPossible();   // 画面の距離表示を即座に更新（ユーザーを待たせない工夫）
+                }
+            });
+        } catch (SecurityException e) {
+            e.printStackTrace(); // 万が一、権限エラーなどが出た場合のログ
+        }
+
+        // ==========================================
+        // 2. 「リアルタイムの位置追跡」を予約
+        // ==========================================
+        // ユーザーは歩いて移動するため、定期的に最新の位置情報を取得する設定を行います。
+        try {
+            // --- 設定の作成 ---
+            // Priority.PRIORITY_BALANCED_POWER_ACCURACY:
+            //   「そこそこの精度」と「バッテリー節約」のバランスが良いモード。
+            //   徒歩ナビなら、GPSを酷使するHIGH_ACCURACYでなくても十分な場合が多いです。
+            // 5000: 標準的な更新間隔（5秒ごと）
+            // --- 更新の開始 ---
+            // request: 上で作った設定
+            // locationCallback: 位置が変わった時に呼ばれる処理（onCreateで作ったもの）
+            // getMainLooper(): メインスレッドで処理を受け取る指定
+            startLocationUpdates(Priority.PRIORITY_BALANCED_POWER_ACCURACY, 5000);
+
+            // ナビ中フラグをONにする
+            isNavigating = true;
+
+        } catch (SecurityException e) {
+            e.printStackTrace();
+        }
+
+        // ==========================================
+        // 3. 「スマホの向き」を測るセンサーを起動
+        // ==========================================
+        // スマホが「北」に対してどっちを向いているかを知るための設定です。
+        if (sensorManager != null) {
+            // 【プランA：高性能コース】
+            // 「回転ベクトルセンサー」がある場合、これ1つで非常に正確な方角がわかります。
+            // 最近のスマホの多くはこれを搭載しています。
+            if (rotationVectorSensor != null) {
+                sensorManager.registerListener(this, rotationVectorSensor, SensorManager.SENSOR_DELAY_UI);
+            }
+            // 【プランB：互換性コース】
+            // プランAがない古い機種などの場合、「加速度センサー」と「磁気センサー」の2つを組み合わせて計算します。
+            else {
+                if (accelSensor != null)
+                    sensorManager.registerListener(this, accelSensor, SensorManager.SENSOR_DELAY_UI);
+                if (magnetSensor != null)
+                    sensorManager.registerListener(this, magnetSensor, SensorManager.SENSOR_DELAY_UI);
+            }
+        }
+    }
+
+    /**
+     * アプリが再びユーザーの目に見える状態（アクティブ）になった時に呼ばれるメソッド。
+     * ここで「一時停止していたセンサーの再開」や「設定画面で変更された内容の反映」を行います。
+     */
+    @Override
+    protected void onResume() {
+        super.onResume();
+
+        if (!isNavigating) return;
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+
+            try {
+                // Determine interval based on power mode
+                long interval = isLowPowerMode ? 30000 : 5000;
+                startLocationUpdates(Priority.PRIORITY_BALANCED_POWER_ACCURACY, interval);
+
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+
+            if (sensorManager != null) {
+                if (rotationVectorSensor != null) {
+                    sensorManager.registerListener(this, rotationVectorSensor, SensorManager.SENSOR_DELAY_UI);
+                } else {
+                    if (accelSensor != null)
+                        sensorManager.registerListener(this, accelSensor, SensorManager.SENSOR_DELAY_UI);
+                    if (magnetSensor != null)
+                        sensorManager.registerListener(this, magnetSensor, SensorManager.SENSOR_DELAY_UI);
+                }
+            }
+
+            android.content.SharedPreferences prefs = getSharedPreferences("AppSettings", MODE_PRIVATE);
+            int size = prefs.getInt("textSize", 40);
+            textDistance.setTextSize(size);
+            int color = prefs.getInt("textColor", android.graphics.Color.parseColor("#74d9e8"));
+            textDistance.setTextColor(color);
+        }
+    }
+
+    /**
+     * アプリが裏側に回った時（電話がかかってきた、ホーム画面に戻った、画面を消した等）に呼ばれるメソッド。
+     * ここでセンサーやGPSを止めないと、ポケットの中で電池がどんどん減ってしまいます。
+     */
+    @Override
+    protected void onPause() {
+        super.onPause(); // Androidシステム側の一時停止処理（必須）
+
+        // ==========================================
+        // 1. ナビゲーション中かどうかの確認
+        // ==========================================
+        // ナビをしていない（センサーが動いていない）なら、停止させるものがないので終了します。
+        if (!isNavigating) return;
+
+        // ==========================================
+        // 2. センサーの監視を解除（★重要：電池節約！）
+        // ==========================================
+        // 方位磁石（コンパス）や加速度センサーは、動かし続けるとバッテリーを大きく消費します。
+        // 画面が見えていない間は動かす意味がないので、必ずここで解除（unregister）します。
+        if (sensorManager != null) {
+            sensorManager.unregisterListener(this);
+        }
+
+        // ==========================================
+        // 3. 位置情報の更新（GPS）を一時停止
+        // ==========================================
+        // 裏でGPSが動き続けると、スマホが熱くなったり電池が切れたりする原因になります。
+        // ここで「位置情報の更新はもう送らなくていいよ」とシステムに伝えます。
+        try {
+            if (fusedLocationClient != null) {
+                fusedLocationClient.removeLocationUpdates(locationCallback);
+            }
+        } catch (Exception e) {
+            // 万が一のエラーでもアプリが落ちないようにキャッチします
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * アクティビティが破棄される（アプリを閉じる、または完全に終了する）時に呼ばれるメソッド。
+     * ここは「立つ鳥跡を濁さず」の精神で、使っていた機能をすべてきれいに片付けます。
+     */
+    @Override
+    protected void onDestroy() {
+        // 1. Androidシステム側の終了処理をまず実行
+        super.onDestroy();
+
+
+
+        // 2. センサーの登録を完全に解除
+        // 通常は onPause で停止されますが、万が一の漏れがないよう、念のためここでも解除を行います。
+        // これにより、メモリリーク（使っていないのにメモリを占有し続ける現象）を確実に防ぎます。
+        if (sensorManager != null) {
+            sensorManager.unregisterListener(this);
+        }
+
+        // 3. 位置情報（GPS）の更新を完全に解除
+        // これを忘れると、アプリが終わってもステータスバーに「GPS使用中」のアイコンが
+        // 残り続けてしまうことがあるため、非常に重要です。
+        try {
+            fusedLocationClient.removeLocationUpdates(locationCallback);
+        } catch (Exception e) {
+            // 解除に失敗しても、終了処理中なのでそのまま静かにスルーします（ignore）
+            // もうアプリが消えるタイミングなので、ここでエラー対応をする必要はあまりありません。
+        }
+    }
+
+    // SensorEventListener implementation
+    /*
+     * センサーの値（スマホの向きや傾き）が変化するたびに自動で呼ばれる
+     * ここで「スマホの向き」と「目的地方向」の差を計算します
+     */
+    /**
+     * センサーの値が変化するたびに（1秒間に何度も）呼ばれるメソッド。
+     * ここで「スマホの向き」と「目的地への方向」を計算し、矢印を回したり、到着判定を行ったりします。
+     */
+    public void onSensorChanged(SensorEvent event) {
+
+        // 方位（北を0度としたスマホの向き）を保持する変数
+        float azimuthDeg = Float.NaN;
+
+        // ==========================================
+        // 1. スマホが「いま北に対してどの向きか」を計算する
+        // ==========================================
+
+        // 【パターンA: 高精度コース】
+        // 回転ベクトルセンサー（最近のスマホに搭載）が反応した場合
+        // これは地磁気とジャイロを内部で合成した、非常に正確でブレにくい値です。
+        if (event.sensor.getType() == Sensor.TYPE_ROTATION_VECTOR) {
+            float[] rotationMatrix = new float[9];
+            SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values);
+            float[] orientation = new float[3];
+            SensorManager.getOrientation(rotationMatrix, orientation);
+            azimuthDeg = (float) Math.toDegrees(orientation[0]);
+        }
+        // 【パターンB: 互換性コース（データ収集）】
+        // 回転ベクトルがない場合、加速度と磁気を別々に保存しておきます。
+        else if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
+            accelValues = event.values.clone();
+
+            // バッテリーセーバー：加速度の変化を検知
+            float x = event.values[0];
+            float y = event.values[1];
+            float z = event.values[2];
+            
+            // 重力分(約9.8)を差し引いた変化量（簡易計算）
+            double acceleration = Math.sqrt(x*x + y*y + z*z) - SensorManager.GRAVITY_EARTH;
+            
+            // 少しでも動いていれば「活動中」とみなす
+            if (Math.abs(acceleration) > 0.5) {
+                lastMovementTime = System.currentTimeMillis();
+                
+                // 省エネモード中なら、通常モード（高頻度更新）に戻す
+                if (isLowPowerMode) {
+                    isLowPowerMode = false;
+                    startLocationUpdates(Priority.PRIORITY_BALANCED_POWER_ACCURACY, 5000);
+                    android.util.Log.d("Navi", "動きを検知：通常モードに復帰");
+                }
+            } else {
+                // しばらく動いていないかチェック
+                if (!isLowPowerMode && (System.currentTimeMillis() - lastMovementTime > STATIONARY_TIMEOUT)) {
+                    isLowPowerMode = true;
+                    // 省エネモード（更新頻度を下げる）に切り替え
+                    startLocationUpdates(Priority.PRIORITY_BALANCED_POWER_ACCURACY, 30000); // 30秒間隔
+                    android.util.Log.d("Navi", "静止を検知：省エネモードへ移行");
+                }
+            }
+        }
+        else if (event.sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD) {
+            magnetValues = event.values.clone();
+        }
+
+        // 【パターンB: 計算実行】
+        // 回転ベクトルが使えず、かつ加速度と磁気の両方のデータが揃っている場合
+        if (Float.isNaN(azimuthDeg) && accelValues != null && magnetValues != null) {
+            float[] R = new float[9];
+            float[] I = new float[9];
+            // 2つのセンサー値を合成して、回転行列（スマホの傾き）を作成
+            if (SensorManager.getRotationMatrix(R, I, accelValues, magnetValues)) {
+                float[] orientation = new float[3];
+                SensorManager.getOrientation(R, orientation);
+                // ラジアンを角度（度数法）に変換
+                azimuthDeg = (float) Math.toDegrees(orientation[0]);
+            }
+        }
+
+        // 方位がまだ計算できていない、または現在地（GPS）がまだ取れていない場合は
+        // 矢印を向けようがないので、ここで処理を中断します。
+        if (Float.isNaN(azimuthDeg) || lastLocation == null) return;
+
+        // 計算しやすいように方位を 0度〜360度 の範囲に整える（-90度などを270度に変換）
+        azimuthDeg = (azimuthDeg + 360) % 360;
+
+        // ==========================================
+        // 2. 目的地までの「距離」と「方角」を計算する
+        // ==========================================
+        // Google提供の計算式を使って、球面上の距離と方位を正確に算出します。
+        float[] results = new float[3];
+        Location.distanceBetween(lastLocation.getLatitude(), lastLocation.getLongitude(),
+                destLat, destLng, results);
+
+        float distanceMeters = results[0]; // 目的地までの距離（メートル）
+        float targetBearing = results[1];  // 現在地から見た目的地の方角（北基準）
+
+        // ==========================================
+        // 3. 状況に応じて処理を振り分ける（到着判定 & 表示更新）
+        // ==========================================
+
+        // ★修正点: 「まだ到着処理をしていない」かつ「5m以内」の場合のみ実行
+        // フラグ（isArrivalProcessed）を使うことで、到着ダイアログが何度も開くのを防ぎます。
+        
+        // 移動平均の計算
+        distanceHistory.add(distanceMeters);
+        if (distanceHistory.size() > DISTANCE_HISTORY_SIZE) {
+            distanceHistory.removeFirst();
+        }
+        
+        float averageDistance = 0;
+        for (float d : distanceHistory) averageDistance += d;
+        averageDistance /= distanceHistory.size();
+
+        if (!isArrivalProcessed && averageDistance <= 10.0f) {
+
+            isArrivalProcessed = true; // ★ロックをかける（これで連打されなくなります）
+            handleArrival();
+
+        } else {
+            // まだ到着していない場合の処理
+
+            // 現在時刻を取得
+            long currentTime = System.currentTimeMillis();
+
+            // ★パフォーマンス改善:
+            // センサーは1秒間に100回近く反応することがありますが、
+            // 画面（UI）をそんなに高速に書き換えるとスマホが重くなり、矢印もプルプル震えて見づらくなります。
+            // そのため、「前回の更新から100ミリ秒（0.1秒）以上経っていなければスキップ」という制限をかけます。
+            if (currentTime - lastUiUpdateTime < 100) {
+                return;
+            }
+            lastUiUpdateTime = currentTime; // 更新時刻を記録
+
+            // 計算した「スマホの向き（azimuthDeg）」と「目的地の方角（targetBearing）」を使って矢印を回す
+            updateNavigationUI(distanceMeters, targetBearing, azimuthDeg);
+
+            // 補足: もし「一度到着したけど、また離れたらリセットしたい」場合は、
+            // 以下のようなコードを追加します。
+            // if (distanceMeters > 20.0f) isArrivalProcessed = false;
+        }
+    }
+
+    /*
+     * 目的地（またはクエスト地点）に到着した瞬間に実行される処理
+     */
+    /**
+     * 目的地（5m以内）に到達したと判定された時に実行されるメソッド。
+     * 「寄り道クエストの場所」なのか「最終的な目的地」なのかで処理を分けます。
+     */
+    private void handleArrival() {
+        // ==========================================
+        // 1. 現在の状態を判定（寄り道中か、最終目的地か）
+        // ==========================================
+        if (isDetourMode) {
+            // --- 【Aパターン：クエスト（寄り道）の目的地に着いた場合】 ---
+
+            // クエストクリア演出（ダイアログ表示など）を行う `finishQuest` メソッドを呼び出します。
+
+            // 【重要】runOnUiThread を使う理由：
+            // この処理はセンサー計算やGPS受信の流れ（バックグラウンドに近い処理）から呼ばれる可能性があります。
+            // Androidでは、画面（UI）を変更する処理は必ず「メインスレッド」で行わなければならないルールがあるため、
+            // 念のためこのブロックで囲って、確実に画面操作ができるようにしています。
+            runOnUiThread(this::finishQuest);
+
+        } else {
+            // --- 【Bパターン：本来の最終目的地（ゴール）に着いた場合】 ---
+
+            // 2. 位置情報の更新を停止
+            // もうゴールに着いたので、これ以上GPSを動かして電池を消耗させる必要はありません。
+            // ここできっちり止めるのが良いアプリの作法です。
+            if (fusedLocationClient != null && locationCallback != null) {
+                fusedLocationClient.removeLocationUpdates(locationCallback);
+            }
+
+            // 3. 画面表示を「到着モード」に切り替え
+            runOnUiThread(() -> {
+                // 距離表示を、数値ではなくメッセージに変更
+                textDistance.setText("到着しました！");
+
+                // 役目を終えた方位矢印を非表示にする（混乱を防ぐため）
+                directionArrow.setVisibility(View.INVISIBLE);
+
+                // ボタンの役割を変更
+                // これまでは「中断（諦める）」ボタンでしたが、
+                // ゴール後は「終了（お疲れ様）」ボタンとして、画面を閉じる動作を割り当てます。
+                buttonStop.setText("終了");
+                buttonStop.setOnClickListener(v -> finish());
+            });
+        }
+    }
+
+    /**
+     * ナビ中の画面表示（距離・矢印の向き・色）をリアルタイムに更新するメソッド。
+     * 修正版：矢印は常に「北」を指し、ユーザーが目的地の方角を向くと「色」と「振動」で知らせる仕組みです。
+     *
+     * @param distanceMeters 目的地までの距離
+     * @param bearing        目的地の方角（北を0度とした角度）
+     * @param azimuthDeg     スマホがいま向いている方角（北を0度とした角度）
+     */
+    private void updateNavigationUI(float distanceMeters, float bearing, float azimuthDeg) {
+
+        // ==========================================
+        // 1. 矢印の回転角度を計算（常に北を指す）
+        // ==========================================
+        // スマホを右（プラス）に回すと、画面内の矢印は左（マイナス）に回すことで、
+        // 常に画面上で「北」の位置を固定して表示します（コンパスの針のような動き）。
+        float northRotation = -azimuthDeg;
+
+        // 角度が -180〜180 の範囲に収まるように正規化（計算上のトラブル防止）
+        if (northRotation < -180) northRotation += 360;
+        if (northRotation >= 180) northRotation -= 360;
+
+        // ==========================================
+        // 2. ターゲット方向とのズレを計算（色の判定用）
+        // ==========================================
+        // 「目的地の方角」から「自分の向いている方角」を引き算して、
+        // 自分が目的地に対してどれくらいズレているかを計算します。
+        float targetBearing = (bearing + 360) % 360;
+        float relativeToDest = targetBearing - azimuthDeg;
+
+        // これも -180〜180 の範囲に正規化します（例: 350度のズレは -10度として扱う）
+        if (relativeToDest < -180) relativeToDest += 360;
+        if (relativeToDest >= 180) relativeToDest -= 360;
+
+        // UIスレッドに渡すための変数は final（変更不可）にする必要があります
+        final float finalNorthRotation = northRotation;
+        final float finalRelativeToDest = relativeToDest;
+        final int dispMeters = Math.round(distanceMeters); // 小数点を四捨五入して見やすく
+
+        // ==========================================
+        // 3. 画面の書き換えとバイブレーション（UIスレッド）
+        // ==========================================
+        runOnUiThread(() -> {
+            // 距離テキストの更新
+            textDistance.setText(String.format("%d m", dispMeters));
+
+            // 矢印の回転を適用（北を指す）
+            directionArrow.setRotation(finalNorthRotation);
+
+            // ★バイブレーション制御用のフラグ
+            // 「目的地の方を向いているか？」の判定（±20度以内なら正解とする「当たり判定」）
+            boolean isFacingTarget = Math.abs(finalRelativeToDest) < 20.0f;
+
+            // --- 色の変更ロジック ---
+            if (isDetourMode) {
+                // クエストモードの場合：合うと黄色、ズレているとターコイズ
+                int color = isFacingTarget ? COLOR_QUEST_MATCH : COLOR_QUEST_MODE;
+                directionArrow.setColorFilter(color);
+            } else {
+                // 通常モードの場合：合うと青、ズレていると赤
+                int color = isFacingTarget ? COLOR_NORMAL_NAV : COLOR_NORMAL_ALERT;
+                directionArrow.setColorFilter(color);
+            }
+
+            // --- バイブレーション通知ロジック ---
+            // 向いている時に「ブルッ」と震わせて、画面を見なくてもわかるようにします
+            if (isFacingTarget) {
+                long currentTime = System.currentTimeMillis();
+
+                // ★重要: 間隔制限（インターバル）
+                // これがないと、正解の方角を向いている間ずっと「ブブブブ…」と震え続け、
+                // 電池も減るしユーザーの手も痺れてしまいます。
+                // ここでは「前回の振動から3秒（3000ms）以上経っている場合のみ」実行します。
+                if (currentTime - lastVibrationTime > 3000) {
+
+                    // 短く振動させる
+                    if (vibrator != null) {
+                        // Android 8.0 (Oreo) 以降とそれ以前で書き方が違うため分岐
+                        // 100ミリ秒だけ、標準的な強さで揺らす
+                        vibrator.vibrate(VibrationEffect.createOneShot(100, VibrationEffect.DEFAULT_AMPLITUDE));
+                    }
+
+                    // 「今鳴らしました」という時間を記録して、次の3秒間は鳴らないようにする
+                    lastVibrationTime = currentTime;
+                }
+            }
+        });
+    }
+
+
+    /**
+     * センサーの精度（正確さ）が変化したときに自動で呼ばれる
+     * @param sensor 対象のセンサー
+     * @param accuracy 新しい精度レベル（4段階など）
+     */
+    @Override
+    public void onAccuracyChanged(Sensor sensor, int accuracy) {
+        // 磁気センサーの精度が変わった時
+        if (sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD) {
+            // Androidではセンサーのイベントは別スレッドに来ることがあるので、
+            // UI（画面）をいじる時は必ず runOnUiThread を使います。
+            runOnUiThread(() -> {
+                if (textStatusConfusion != null) {
+                    // 精度が低い（0:信頼不可, 1:精度低）場合は「混乱中」を表示
+                    if (accuracy == SensorManager.SENSOR_STATUS_UNRELIABLE || 
+                        accuracy == SensorManager.SENSOR_STATUS_ACCURACY_LOW) {
+                        textStatusConfusion.setVisibility(View.VISIBLE);
+                    } else {
+                        // 精度が良い（2:中, 3:高）場合は非表示
+                        textStatusConfusion.setVisibility(View.GONE);
+                    }
+                }
+            });
+        }
+    }
+
+    /**
+     * GPSの位置情報（lastLocation）をもとに、距離表示と矢印の向きを更新するメソッド。
+     * センサー（コンパス）による更新とは別に、自分が移動したことによる変化を反映します。
+     */
+    private void updateDistanceIfPossible() {
+        // まだ現在地が取れていない場合は何もしない
+        if (lastLocation == null) return;
+
+        // ✅ 追加: 更新頻度の制限
+        long currentTime = System.currentTimeMillis();
+        if (currentTime - lastUiUpdateTime < 100) {
+            return;
+        }
+        lastUiUpdateTime = currentTime;
+
+        float[] results = new float[3];
+        // Googleの計算式を使い、現在地と目的地の「正確な距離」と「方角」を算出
+        Location.distanceBetween(lastLocation.getLatitude(), lastLocation.getLongitude(), destLat, destLng, results);
+
+        final int dispMeters = Math.round(results[0]); // 距離（メートル）
+        final float targetBearing = results[1];        // 目的地の方角（北基準）
+
+        // ==========================================
+        // 1. 距離テキストの更新
+        // ==========================================
+        // GPS更新はバックグラウンドで行われることがあるため、UIスレッドで安全に描画します
+        runOnUiThread(() -> textDistance.setText(String.format("%d m", dispMeters)));
+
+        // ==========================================
+        // 2. 矢印のスムーズな回転アニメーション
+        // ==========================================
+        // 単に setRotation するのではなく、アニメーションを使うことでカクカクした動きを防ぎます。
+
+        float fromDegree = currentDegree; // 今向いている角度（アニメーション開始位置）
+        float toDegree = targetBearing;   // 新しい目的地の角度（アニメーション終了位置）
+
+        // --- 【最短距離で回転させるための補正計算】 ---
+        // 例えば「350度」から「10度」に動くとき、そのまま計算すると
+        // 「反時計回りに340度」回ってしまいます。
+        // これを「時計回りに20度」動くように、360度を足し引きして補正します。
+        if (fromDegree - toDegree > 180) {
+            toDegree += 360;
+        } else if (toDegree - fromDegree > 180) {
+            toDegree -= 360;
+        }
+
+        // 回転アニメーションの設定
+        // RELATIVE_TO_SELF, 0.5f は「画像の中心を軸に回す」という意味です
+        RotateAnimation ra = new RotateAnimation(
+                fromDegree, toDegree,
+                Animation.RELATIVE_TO_SELF, 0.5f,
+                Animation.RELATIVE_TO_SELF, 0.5f);
+
+        ra.setDuration(210); // 0.21秒かけて滑らかに回す
+        ra.setFillAfter(true); // アニメーション終了後の角度を維持する
+
+        // アニメーション開始
+        directionArrow.startAnimation(ra);
+
+        // 次回のために「今の角度」を保存しておく
+        currentDegree = toDegree;
+
+        // ★ 修正ポイント：ここにあった「50m以内のクリア判定」は削除済み
+        // 到着判定は onSensorChanged の「5.0f（5m）」の方で一括管理することで、
+        // 「GPS更新時」と「センサー更新時」のダブルチェックによる不具合を防いでいます。
+    }
+    // 判定ロジック
+    /**
+     * 現在地から一定距離内にある未クリアのクエストを探す「レーダー」処理。
+     * GPSが更新されるたびに呼び出され、近くに面白そうな場所がないか監視します。
+     *
+     * @param currentLocation GPSで取得した最新の現在地
+     */
+    private void checkQuestTrigger(Location currentLocation) {
+        // ==========================================
+        // 1. 二重発生の防止
+        // ==========================================
+        // すでに寄り道（クエスト）を開始しているなら、別のクエストを探す必要はないので終了します。
+        // これにより、クエスト中に別の通知が割り込んでくるのを防ぎ、ユーザーが今の冒険に集中できるようにします。
+        if (isDetourMode) return;
+
+        // ローカル保存されたクリア済みクエストIDを取得
+        java.util.Set<String> clearedQuestIds = loadClearedQuestIds();
+
+        // ==========================================
+        // 2. クエストリストを順番にチェック
+        // ==========================================
+        // Firestoreから読み込んでおいた全てのクエスト候補を1つずつ調べます。
+        for (Quest q : questList) {
+
+            // すでにローカルでクリア済みのものは再表示しません（ユーザー固有の判定）
+            if (clearedQuestIds.contains(q.id)) continue;
+
+            // さっきユーザーが「いいえ（無視）」を選択したものは、しつこく出さないようにスキップします。
+            // これがないと、断った瞬間にまたダイアログが出てしまい、ユーザーに嫌がられる原因になります。
+            if (ignoredQuestIds.contains(q.id)) continue;
+
+            // ==========================================
+            // 3. 距離の計算
+            // ==========================================
+            float[] results = new float[1];
+            // Android標準の計算式を使い、現在地とクエスト地点の距離を正確に算出します
+            Location.distanceBetween(currentLocation.getLatitude(), currentLocation.getLongitude(),
+                    q.latitude, q.longitude, results);
+            float distance = results[0]; // 計算された距離（メートル）
+            
+
+            // ==========================================
+            // 4. クエスト発生の判定
+            // ==========================================
+            // ユーザーがクエスト地点の「半径300m以内」に入ったかどうかをチェックします。
+            // ※300mという設定は、「近すぎず遠すぎない（＝ちょっと寄り道してみようかなと思える）」絶妙な距離感です。
+            if (distance < 300.0f) {
+
+                // 今反応したクエストを「挑戦候補」として一時保存します
+                currentQuest = q;
+
+                // 画面に「近くに〇〇があります。行ってみますか？」というダイアログを表示
+                showQuestDialog();
+
+                // 同時に複数のダイアログが重なって出るとバグの原因になるため、
+                // 1つ見つけたら「発見！」としてループを抜け、処理を終了します。
+                break;
+            }
+        }
+    }
+
+    /*
+     * クエストが発生したことを知らせるダイアログを表示し、バイブで通知する
+     */
+    /**
+     * クエスト発生時に、カスタムデザインのダイアログを表示してユーザーに選択を求めるメソッド。
+     * 標準の AlertDialog ではなく、R.layout.dialog_quest を読み込んで表示します。
+     */
+    private void showQuestDialog() {
+        // ==========================================
+        // 1. 二重表示の防止（ガード節）
+        // ==========================================
+        // 万が一、同時に複数の判定が走っても、ダイアログが2つ重なって出ないようにロックをかけます。
+        if (isQuestDialogShown) return;
+        isQuestDialogShown = true; // 「今出してます」フラグをON
+
+        // ==========================================
+        // 2. ユーザーへの通知（バイブレーション）
+        // ==========================================
+        // 画面を見ていなくても「何かあった！」と気づかせるための演出です。
+        Vibrator vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+        if (vibrator != null) {
+            // パターン定義: {待機時間, 振動時間, 待機時間, 振動時間...}
+            // ここでは「ブッ！(100ms) … ブーッ！(200ms)」という、警告・発見感のあるリズムを作っています。
+            long[] pattern = {0, 100, 100, 200};
+
+            // -1 は「繰り返しなし（1回だけ鳴らす）」という意味です
+            vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1));
+        }
+
+        // ==========================================
+        // 3. デザインの読み込み（Inflate）
+        // ==========================================
+        // ここがカスタムダイアログの肝です。
+        // 作っておいたXMLファイル（R.layout.dialog_quest）を、プログラムで扱える「View」に変換します。
+        android.view.LayoutInflater inflater = this.getLayoutInflater();
+        android.view.View dialogView = inflater.inflate(R.layout.dialog_quest, null);
+
+        // ==========================================
+        // 4. 文字やボタンの準備
+        // ==========================================
+        // 読み込んだ View の中にある部品を見つけ出します。
+        // ※ dialogView.findViewById と書くのがポイントです（this.findViewById だと本体画面を探してしまうため）。
+        TextView titleView = dialogView.findViewById(R.id.dialog_title);
+        TextView messageView = dialogView.findViewById(R.id.dialog_message);
+        Button btnAccept = dialogView.findViewById(R.id.btn_accept);
+        Button btnCancel = dialogView.findViewById(R.id.btn_cancel);
+
+        // ==========================================
+        // 5. テキストのセット（動的変更）
+        // ==========================================
+        // クエストごとに違う名前や説明文をセットします。
+        titleView.setText("QUEST START!\n" + currentQuest.name);
+
+        StringBuilder msg = new StringBuilder();
+        // 説明文がある場合だけ、カッコ書きで追加する
+        if (currentQuest.description != null && !currentQuest.description.isEmpty()) {
+            msg.append("「").append(currentQuest.description).append("」\n\n");
+        }
+        msg.append("近くにクエストを発見しました。\nクエストに挑戦しますか？");
+        messageView.setText(msg.toString());
+
+        // ==========================================
+        // 6. ダイアログの組み立て
+        // ==========================================
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setView(dialogView) // ★ここで自作のデザインをはめ込みます！
+                .setCancelable(false) // ダイアログの外側をタップしても消えないようにする（強制選択）
+                .create();
+
+        // ==========================================
+        // 7. ボタンを押した時の動作設定
+        // ==========================================
+
+        // 【挑戦する（YES）ボタン】
+        btnAccept.setOnClickListener(v -> {
+            startDetour();    // 寄り道モード開始処理へ
+            dialog.dismiss(); // ダイアログを閉じる
+        });
+
+        // 【今回はやめる（NO）ボタン】
+        btnCancel.setOnClickListener(v -> {
+            // 次回以降、同じ場所で何度も通知が出ないように「無視リスト」に追加
+            if (currentQuest != null && currentQuest.id != null) {
+                ignoredQuestIds.add(currentQuest.id);
+            }
+
+            isQuestDialogShown = false; // 表示フラグを解除して、また別のクエストが出せるようにする
+            dialog.dismiss(); // ダイアログを閉じる
+        });
+
+        // ==========================================
+        // 8. 画面に表示！
+        // ==========================================
+        dialog.show();
+    }
+
+    /**
+     * 本来の目的地を一時保存し、ナビの目的地を「クエスト地点」に切り替える
+     */
+    private void startDetour() {
+        // 1. 【バックアップ】本来の目的地を保存
+        // クエストが終わった後に元のルートに戻れるよう、
+        // 現在の目的地（緯度・経度）を「originalDest...」という変数にコピーしておきます。
+        originalDestLat = destLat;
+        originalDestLng = destLng;
+
+        // 2. 【目的地の書き換え】クエスト地点を新しい目的地にセット
+        // これにより、矢印や距離計算が自動的にクエスト地点を指すようになります。
+        destLat = currentQuest.latitude;
+        destLng = currentQuest.longitude;
+
+        // 3. 【モード切替】寄り道モードをONにする
+        // このフラグが true になることで、矢印の色判定などが「クエスト用」に切り替わります。
+        isDetourMode = true;
+
+        // 4. 【視覚演出】矢印の色をマゼンタに変更
+        // ユーザーが「今はクエストに向かっているんだな」と直感的にわかるように
+        // 矢印の色を塗り替えます。
+        try {
+            directionArrow.setColorFilter(COLOR_QUEST_MODE);
+        } catch (Exception ignored) {
+            // 万が一エラーが起きても、ナビ自体は止まらないようにしています
+        }
+
+        // 5. ユーザーへの通知
+        Toast.makeText(this, "クエストを受理しました！", Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * クエスト地点に到着した際の処理。
+     * 報酬（クリア実績）をデータベースに保存し、本来の目的地へのナビゲーションに復帰します。
+     */
+    private void finishQuest() {
+        // ==========================================
+        // 1. モードの解除
+        // ==========================================
+        // 寄り道モードを終了します。これで矢印の判定ロジックなどが通常に戻ります。
+        isDetourMode = false;
+
+        distanceHistory.clear();
+
+
+        if (currentQuest != null) {
+            // まず、アプリ内（メモリ上）のデータを更新して、地図上のピンなどが即座に消えるようにします
+            currentQuest.isCleared = true;
+
+            // ==========================================
+            // 2. ローカルストレージ（SharedPreferences）に保存
+            // ==========================================
+            // Firestoreへの更新は他のユーザーにも影響するため削除。
+            // 代わりに端末内のみにクリア情報を保存します（プライバシー配慮＆ユーザー固有進捗）。
+            if (currentQuest.id != null) {
+                saveClearedQuestId(currentQuest.id);
+                android.util.Log.d("Navi", "クエストクリア状態をローカルに保存しました: " + currentQuest.id);
+            }
+        }
+
+        // ==========================================
+        // 3. ルートの復帰（本来の目的地に戻す）
+        // ==========================================
+        // startDetour メソッドで退避させておいた「本来のゴール地点（駅や学校など）」を
+        // 現在の目的地変数（destLat/Lng）に書き戻します。
+        // これで、矢印は再び本来のゴールを指すようになります。
+        destLat = originalDestLat;
+        destLng = originalDestLng;
+        
+        // 5. 距離履歴のクリア (バグ修正)
+        distanceHistory.clear();
+
+        // ==========================================
+        // 4. クリア演出（ダイアログ表示）
+        // ==========================================
+        // ユーザーに達成感を伝えるためのメッセージを表示します。
+        new AlertDialog.Builder(this)
+                .setTitle("クエストクリア！")
+                .setMessage("おめでとうございます！\n元の冒険に復帰します。")
+                .setPositiveButton("OK", null)
+                .show();
+
+        // ==========================================
+        // 5. 矢印の見た目を元に戻す
+        // ==========================================
+        // クエストモードの色（マゼンタなど）を解除（clear）し、デフォルトのデザインに戻します。
+        try {
+            directionArrow.clearColorFilter();
+        } catch (Exception ignored) {}
+
+        // ==========================================
+        // 6. 到着フラグのリセット（★最重要）
+        // ==========================================
+        // これまで「クエスト地点に到着済み」状態でロックがかかっていましたが（isArrivalProcessed = true）、
+        // ここで false に戻すことで、次の「本来の目的地」に着いた時に再び到着判定が動くようにします。
+        // これを忘れると、本来のゴールに着いても無反応になってしまいます。
+        isArrivalProcessed = false;
+    }
+
+    /**
+     * 画面回転やメモリ不足などでアプリが一時的に破棄される直前に呼ばれるメソッド。
+     * ここで変数の値を「Bundle（荷物）」に詰めておかないと、画面が回転した瞬間に
+     * ナビの状態がリセットされ、初期状態に戻ってしまいます。
+     */
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState); // 親クラスの保存処理（必須）
+
+        // ==========================================
+        // 1. フラグ（状態）の保存
+        // ==========================================
+        // 「今、寄り道モード中だったか？」「ダイアログは出しっぱなしだったか？」を記録します。
+        // これを保存しないと、回転した瞬間に通常モードに戻ってしまいます。
+        outState.putBoolean("isDetourMode", isDetourMode);
+        outState.putBoolean("isQuestDialogShown", isQuestDialogShown);
+
+        // ==========================================
+        // 2. 座標データの保存
+        // ==========================================
+        // 「今、矢印が指している場所（dest）」と「本来のゴール（original）」をメモします。
+        // これにより、回転後も正しい場所を指し続けることができます。
+        outState.putDouble("destLat", destLat);
+        outState.putDouble("destLng", destLng);
+        outState.putDouble("originalDestLat", originalDestLat);
+        outState.putDouble("originalDestLng", originalDestLng);
+
+        // ==========================================
+        // 3. クエスト情報の保存（ID方式）
+        // ==========================================
+        if (currentQuest != null) {
+            // クエストの情報（名前や説明文など）をすべて保存するのは大変なので、
+            // ここでは検索用のキーとなる「ID」だけを保存します。
+            // ※復帰時（onCreate）に、このIDを使ってリストからクエスト情報を再検索します。
+            outState.putString("currentQuestId", currentQuest.id);
+
+            try {
+                // クリア状態も念のため保存
+                outState.putBoolean("questCleared", currentQuest.isCleared);
+            } catch (Exception e) {
+                // 万が一データが欠けていてもアプリが落ちないように無視する
+            }
+        }
+    }
+
+    // ==========================================
+    // ローカル保存：クリア済みクエストID管理
+    // ==========================================
+
+    /**
+     * クリア済みクエストIDをSharedPreferencesから読み込む
+     * @return クリア済みクエストIDのセット
+     */
+    private java.util.Set<String> loadClearedQuestIds() {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        return prefs.getStringSet(KEY_CLEARED_QUESTS, new java.util.HashSet<>());
+    }
+
+    /**
+     * クエストIDをクリア済みとしてSharedPreferencesに保存する
+     * @param questId 保存するクエストID
+     */
+    private void saveClearedQuestId(String questId) {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        // 既存のセットをコピーして新しいIDを追加（getStringSetはイミュータブルの可能性があるため）
+        java.util.Set<String> clearedIds = new java.util.HashSet<>(loadClearedQuestIds());
+        clearedIds.add(questId);
+        prefs.edit().putStringSet(KEY_CLEARED_QUESTS, clearedIds).apply();
+    }
+
+    // GPS更新を開始するヘルパーメソッド
+    private void startLocationUpdates(int priority, long intervalMillis) {
+        try {
+             if (fusedLocationClient != null) {
+                 fusedLocationClient.removeLocationUpdates(locationCallback); // 重複防止のため一度削除
+                 
+                 LocationRequest request = new LocationRequest.Builder(priority, intervalMillis)
+                        .setMinUpdateIntervalMillis(intervalMillis / 2)
+                        .build();
+                 
+                 if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                     fusedLocationClient.requestLocationUpdates(request, locationCallback, getMainLooper());
+                 }
+             }
+        } catch (SecurityException e) {
+            e.printStackTrace();
+        }
+    }
+}

@@ -1,0 +1,157 @@
+package com.example.arrowadventureapp;
+
+import android.annotation.SuppressLint;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.os.Bundle;
+import android.util.Log;
+import android.view.View;
+import android.widget.Toast;
+
+import androidx.activity.EdgeToEdge;
+import androidx.activity.OnBackPressedCallback;
+import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * 履歴（冒険の記録）を表示・選択する画面のアクティビティ。
+ */
+public class Rireki extends AppCompatActivity {
+
+    // ログ出力用のタグと、データ保存（SharedPreferences）に使うキー定数
+    private static final String TAG = "rireki";
+    private static final String PREFS_NAME = "mokutekiti_prefs";
+    private static final String KEY_HISTORY_ADDR = "search_history_addr";
+
+    // リスト表示に必要な部品
+    private RecyclerView recyclerView; // リスト表示用のビュー
+    private HistoryAdapter adapter;    // データとビューをつなぐアダプター
+
+    private List<HistoryItem> historyList; // 履歴データの本体リスト
+
+    @SuppressLint("MissingInflatedId")
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        // 画面を端まで広げる設定（EdgeToEdge）
+        EdgeToEdge.enable(this);
+        setContentView(R.layout.rireki);
+
+        // --- 画面の余白調整 ---
+        // システムバー（ステータスバーやナビゲーションバー）とコンテンツが重ならないようにパディングを設定
+        View naviView = findViewById(R.id.naviInfo);
+        if (naviView == null) {
+            naviView = findViewById(android.R.id.content); // idが見つからない場合のフォールバック
+        }
+        if (naviView != null) {
+            ViewCompat.setOnApplyWindowInsetsListener(naviView, (v, insets) -> {
+                Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+                v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
+                return insets;
+            });
+        }
+
+        // --- リスト表示（RecyclerView）のセットアップ ---
+        recyclerView = findViewById(R.id.historyRecyclerView);
+        // 縦方向にリストを並べるレイアウトマネージャーを設定
+        recyclerView.setLayoutManager(new LinearLayoutManager(this));
+
+        // 1. 保存されている履歴データを読み込む
+        historyList = loadAddressHistory();
+
+        // 2. アダプターを作成し、クリック時の動作を定義する
+        adapter = new HistoryAdapter(historyList, item -> {
+            // リストの項目がタップされた時の処理
+            Intent out = new Intent();
+            // 選ばれた場所のデータをインテントに詰める
+            out.putExtra("address", item.address);
+            out.putExtra("lat", item.lat);
+            out.putExtra("lng", item.lng);
+
+            // 結果をOKとしてセットし、この画面を閉じる
+            setResult(RESULT_OK, out);
+            finish(); // 前の画面（MokutekitiActivity）に戻る
+        });
+
+        // 3. RecyclerViewにアダプターをセットして表示開始
+        recyclerView.setAdapter(adapter);
+
+
+        // --- 履歴全削除ボタンの設定 ---
+        View clearBtn = findViewById(R.id.rirekiclear);
+        if (clearBtn != null) {
+            clearBtn.setOnClickListener(v -> {
+                // いきなり消さず、確認ダイアログを表示する（親切設計）
+                new AlertDialog.Builder(Rireki.this)
+                        .setTitle("冒険の記録の削除")
+                        .setMessage("すべての冒険の記録を削除してもよろしいですか？")
+                        .setPositiveButton("削除する", (dialog, which) -> {
+                            // SharedPreferencesからデータを実際に削除
+                            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+                            prefs.edit().remove(KEY_HISTORY_ADDR).apply();
+
+                            // 画面上のリストも空にして更新
+                            historyList.clear();
+                            adapter.notifyDataSetChanged();
+
+                            Toast.makeText(Rireki.this, "冒険の記録をすべて削除しました", Toast.LENGTH_SHORT).show();
+                        })
+                        .setNegativeButton("キャンセル", null) // 何もしない
+                        .show();
+            });
+        }
+
+        // --- 画面左上の戻るボタン設定 ---
+        View backBtn = findViewById(R.id.backButton);
+        if (backBtn != null) {
+            // 押されたらシンプルに画面を閉じる
+            backBtn.setOnClickListener(view -> finish());
+        } else {
+            Log.w(TAG, "backButton view not found in rireki layout");
+        }
+    }
+
+
+    /**
+     * SharedPreferences から履歴データ（JSON文字列）を読み込み、
+     * HistoryItemのリストに変換して返すメソッド
+     */
+    private ArrayList<HistoryItem> loadAddressHistory() {
+        ArrayList<HistoryItem> list = new ArrayList<>();
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+
+        // 保存されたJSON文字列を取得（なければ空の配列文字列 "[]"）
+        String json = prefs.getString(KEY_HISTORY_ADDR, "[]");
+
+        try {
+            // JSON文字列を解析してリストに追加していく
+            JSONArray arr = new JSONArray(json);
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.getJSONObject(i);
+
+                // データを取り出す（万が一データが欠けていても落ちないように optString/optDouble を使用）
+                String address = o.optString("address", "");
+                double lat = o.optDouble("lat", Double.NaN);
+                double lng = o.optDouble("lng", Double.NaN);
+
+                list.add(new HistoryItem(address, lat, lng));
+            }
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
+        return list;
+    }
+}

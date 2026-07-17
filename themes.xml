@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    tools:context=".MokutekitiActivity"
+    android:weightSum="4">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="目的地設定"
+        android:fontFamily="@font/pixelmplus12regular"
+        android:textSize="40dp"
+        android:letterSpacing="0.5"
+        android:layout_marginTop="40dp"
+        android:textColor="@color/textcolor"
+        android:gravity="center"/>
+
+    <androidx.appcompat.widget.SearchView
+        android:id="@+id/sagasu"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/search_background"
+        app:queryHint="場所を検索"
+        app:iconifiedByDefault="false"
+        app:maxWidth="10000dp"/>
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/suggest_recycler_view"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/search_background"
+        android:visibility="gone"
+        android:elevation="10dp"/>
+
+    <fragment
+        android:id="@+id/mokutekiti_map"
+        android:name="com.google.android.gms.maps.SupportMapFragment"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="4" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"/>
+
+    <Button
+        android:id="@+id/log"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="冒険の記録"
+        android:fontFamily="@font/pixelmplus12regular"
+        android:backgroundTint="#0D47A1"
+        android:layout_marginRight="10sp"
+        android:layout_marginLeft="10sp"
+        android:textSize="45dp"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/buttonreturn"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="2"
+            android:layout_marginLeft="40sp"
+            android:text="戻る"
+            android:fontFamily="@font/pixelmplus12regular"
+            android:backgroundTint="#546E7A"
+            android:textSize="45dp"
+            android:layout_gravity="center"/>
+
+        <Button
+            android:id="@+id/buttonok"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="2"
+            android:text="決定"
+            android:fontFamily="@font/pixelmplus12regular"
+            android:backgroundTint="#B71C1C"
+            android:textSize="45dp"
+            android:layout_marginLeft="40sp"
+            android:layout_marginRight="40sp"
+            android:layout_gravity="center"/>
+
+    </LinearLayout>
+</LinearLayout>

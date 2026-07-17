@@ -1,0 +1,471 @@
+package com.example.arrowadventureapp;
+
+import android.Manifest;
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.location.Address;
+import android.location.Geocoder;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.provider.Settings;
+import android.view.View;
+import android.widget.Toast;
+
+import androidx.activity.OnBackPressedCallback;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.SearchView;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+
+import androidx.activity.EdgeToEdge;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
+
+import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationServices;
+import com.google.android.gms.maps.CameraUpdateFactory;
+import com.google.android.gms.maps.GoogleMap;
+import com.google.android.gms.maps.OnMapReadyCallback;
+import com.google.android.gms.maps.SupportMapFragment;
+import com.google.android.gms.maps.model.LatLng;
+import com.google.android.gms.maps.model.Marker;
+import com.google.android.gms.maps.model.MarkerOptions;
+import com.google.android.libraries.places.api.Places;
+import com.google.android.libraries.places.api.model.AutocompletePrediction;
+import com.google.android.libraries.places.api.model.AutocompleteSessionToken;
+import com.google.android.libraries.places.api.model.RectangularBounds;
+import com.google.android.libraries.places.api.net.FindAutocompletePredictionsRequest;
+import com.google.android.libraries.places.api.net.PlacesClient;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/**
+ * 目的地決定画面のアクティビティ。
+ * 地図（Google Maps）を表示し、検索やタップ操作で目的地を選定します。
+ */
+public class MokutekitiActivity extends AppCompatActivity implements OnMapReadyCallback {
+
+    // --- 定数（設定の保存キーや制限数） ---
+    private static final String PREFS_NAME = "mokutekiti_prefs";
+    private static final String KEY_HISTORY_ADDR = "search_history_addr";
+    private static final int MAX_HISTORY_RIREKI = 10; // 履歴は最新10件まで
+
+    // --- UIコンポーネント ---
+    private GoogleMap mMap;                   // Googleマップ本体
+    private SearchView searchView;            // 住所検索バー
+    private RecyclerView suggestRecyclerView; // 検索予測（サジェスト）のリスト表示用
+    private SuggestAdapter suggestAdapter;    // サジェストリストのデータを管理するアダプター
+
+    // --- ツール・クライアント ---
+    private FusedLocationProviderClient fusedLocationClient; // 現在地を取得するためのクライアント
+    private PlacesClient placesClient;        // Google Places API（場所検索）を使うクライアント
+    private AutocompleteSessionToken token;   // 検索セッションを管理するトークン（課金最適化用）
+    private Marker currentMarker;             // 地図上に表示する赤いピン（マーカー）
+
+    // 非同期処理用（重たい処理をメインスレッド以外でやるため）
+    private final ExecutorService executorService = Executors.newSingleThreadExecutor();
+
+    // --- データ ---
+    private String currentAddressName = ""; // 現在選択されている場所の住所名
+
+    // ==========================================
+    // 0. ActivityResultLauncher の定義
+    // ==========================================
+    // ※onCreateよりも前に定義する必要があります
+
+    // 【権限リクエスト用】: 位置情報の許可をユーザーに求めるランチャー
+    private final ActivityResultLauncher<String> requestPermissionLauncher = registerForActivityResult(
+            new ActivityResultContracts.RequestPermission(),
+            isGranted -> {
+                if (isGranted) {
+                    // 許可されたら現在地を表示
+                    enableMyLocation();
+                } else {
+                    // 拒否されたら設定画面への誘導ダイアログを出す
+                    showPermissionSettingsDialog();
+                }
+            }
+    );
+
+    // 【履歴画面からの戻り値用】: 履歴画面で選んだ場所を受け取るランチャー
+    private final ActivityResultLauncher<Intent> historyLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(),
+            result -> {
+                if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                    // 履歴画面からデータが送られてきた場合
+                    Intent data = result.getData();
+                    double lat = data.getDoubleExtra("lat", 0);
+                    double lng = data.getDoubleExtra("lng", 0);
+                    String addr = data.getStringExtra("address");
+
+                    // 座標があれば地図をそこに移動させる
+                    if (lat != 0 && lng != 0) {
+                        LatLng target = new LatLng(lat, lng);
+                        currentAddressName = (addr != null) ? addr : "履歴からの地点";
+                        placeOrMoveMarker(target); // ピンを立てる
+                        mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(target, 15)); // カメラ移動
+                    }
+                }
+            }
+    );
+
+    // ==========================================
+    // 1. ライフサイクルメソッド (画面生成時)
+    // ==========================================
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        EdgeToEdge.enable(this);
+        setContentView(R.layout.activity_mokutekiti);
+
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
+            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
+            return insets;
+        });
+
+        // 各種初期化処理を実行
+        initializePlaces(); // Places APIの準備
+        initializeMap();    // Google Mapの準備
+        setupViews();       // 画面部品の準備
+        setupListeners();   // ボタンなどの動作設定
+
+        // 戻るボタンの無効化（誤操作防止）
+        getOnBackPressedDispatcher().addCallback(new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                // 何もしないことで、スマホ本体の戻るボタンを無効化
+            }
+        });
+    }
+
+    // 地図の準備が整ったら呼ばれるメソッド (OnMapReadyCallbackの実装)
+    @Override
+    public void onMapReady(@NonNull GoogleMap googleMap) {
+        mMap = googleMap;
+
+        // 位置情報の権限があるかチェック
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED) {
+            // 権限があれば現在地ボタン（青い点）を有効化
+            enableMyLocation();
+        } else {
+            // 権限がなければリクエスト（許可を求めるポップアップ）を出す
+            requestPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION);
+        }
+
+        // マップ上の任意の場所をタップした時の処理
+        // タップした座標から住所を特定してピンを立てる
+        mMap.setOnMapClickListener(this::getAddressFromLocation);
+    }
+
+    // ==========================================
+    // 2. 初期化・セットアップメソッド
+    // ==========================================
+
+    // Places API（検索予測機能）の初期化
+    private void initializePlaces() {
+        if (!Places.isInitialized()) {
+            Places.initialize(getApplicationContext(), BuildConfig.MAPS_API_KEY);
+        }
+        placesClient = Places.createClient(this);
+        token = AutocompleteSessionToken.newInstance();
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
+    }
+
+    // マップフラグメントの読み込み
+    private void initializeMap() {
+        SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
+                .findFragmentById(R.id.mokutekiti_map);
+        if (mapFragment != null) {
+            mapFragment.getMapAsync(this); // 非同期でマップを準備
+        }
+    }
+
+    // ビュー（画面部品）の設定
+    private void setupViews() {
+        searchView = findViewById(R.id.sagasu);
+        suggestRecyclerView = findViewById(R.id.suggest_recycler_view);
+
+        // 検索予測リストの設定
+        suggestRecyclerView.setLayoutManager(new LinearLayoutManager(this));
+        suggestAdapter = new SuggestAdapter(prediction -> {
+            // 予測リストの項目がクリックされた時の処理
+            String placeName = prediction.getPrimaryText(null).toString();
+            searchView.setQuery(placeName, true); // 検索ボックスに文字を入れて検索実行
+            suggestRecyclerView.setVisibility(View.GONE); // リストを隠す
+            searchView.clearFocus();
+        });
+        suggestRecyclerView.setAdapter(suggestAdapter);
+    }
+
+    // ボタンや検索バーのイベントリスナー設定
+    private void setupListeners() {
+        // 戻るボタン (左上) -> メインメニューに戻る
+        findViewById(R.id.buttonreturn).setOnClickListener(view -> {
+            Intent intent = new Intent(MokutekitiActivity.this, MainActivity.class);
+            startActivity(intent);
+            finish();
+        });
+
+        // 決定ボタン -> 目的地確認ダイアログを表示
+        findViewById(R.id.buttonok).setOnClickListener(v -> showConfirmDialog());
+
+        // 履歴ボタン -> 履歴画面へ移動
+        findViewById(R.id.log).setOnClickListener(v -> {
+            Intent intent = new Intent(MokutekitiActivity.this, Rireki.class);
+            historyLauncher.launch(intent); // 結果を受け取るためにランチャーで起動
+        });
+
+        // 検索ビューの文字入力・送信リスナー
+        searchView.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
+            @Override
+            public boolean onQueryTextSubmit(String query) {
+                // 検索ボタンが押されたら住所検索を実行
+                executeSearch(query);
+                searchView.clearFocus(); // キーボードを閉じる
+                suggestRecyclerView.setVisibility(View.GONE);
+                return true;
+            }
+
+            @Override
+            public boolean onQueryTextChange(String newText) {
+                // 文字が入力されるたびに予測候補を取得
+                if (!newText.isEmpty()) {
+                    fetchSuggestions(newText);
+                } else {
+                    suggestRecyclerView.setVisibility(View.GONE);
+                }
+                return false;
+            }
+        });
+    }
+
+    // ==========================================
+    // 3. ロジック・機能メソッド (検索、マップ操作)
+    // ==========================================
+
+    // Google Places APIを使って検索予測（サジェスト）を取得
+    private void fetchSuggestions(String query) {
+        // 日本付近の範囲を指定（検索精度を上げるため）
+        RectangularBounds bounds = RectangularBounds.newInstance(
+                new LatLng(20, 122),
+                new LatLng(46, 154)
+        );
+
+        FindAutocompletePredictionsRequest request = FindAutocompletePredictionsRequest.builder()
+                .setLocationBias(bounds)
+                .setOrigin(new LatLng(35.681236, 139.767125)) // 東京駅中心
+                .setCountries("JP") // 日本国内に限定
+                .setSessionToken(token)
+                .setQuery(query)
+                .build();
+
+        placesClient.findAutocompletePredictions(request).addOnSuccessListener(response -> {
+            List<AutocompletePrediction> predictions = response.getAutocompletePredictions();
+            suggestAdapter.setPredictions(predictions); // アダプターにデータを渡す
+            suggestRecyclerView.setVisibility(View.VISIBLE); // リストを表示
+        }).addOnFailureListener(exception -> {
+            // エラー時は何もしない（ログ出力など任意）
+        });
+    }
+
+    // 住所名から座標を検索してピンを立てる（非同期処理）
+    private void executeSearch(String query) {
+        // UI操作用のハンドラ（メインスレッドに戻るため）
+        Handler mainHandler = new Handler(Looper.getMainLooper());
+
+        // 通信処理なのでバックグラウンドスレッドで実行
+        executorService.execute(() -> {
+            Geocoder geocoder = new Geocoder(MokutekitiActivity.this, Locale.JAPAN);
+            try {
+                // 住所文字列から座標のリストを取得（最大1件）
+                List<Address> addressList = geocoder.getFromLocationName(query, 1);
+
+                // UIスレッドに戻って結果を地図に反映
+                mainHandler.post(() -> {
+                    if (addressList != null && !addressList.isEmpty()) {
+                        Address address = addressList.get(0);
+                        LatLng latLng = new LatLng(address.getLatitude(), address.getLongitude());
+
+                        currentAddressName = query;
+                        placeOrMoveMarker(latLng); // ピンを移動
+                        mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 15)); // ズームして移動
+                    } else {
+                        Toast.makeText(MokutekitiActivity.this, "場所が見つかりませんでした", Toast.LENGTH_SHORT).show();
+                    }
+                });
+            } catch (IOException e) {
+                e.printStackTrace();
+                mainHandler.post(() ->
+                        Toast.makeText(MokutekitiActivity.this, "検索エラーが発生しました", Toast.LENGTH_SHORT).show()
+                );
+            }
+        });
+    }
+
+    // 地図上の座標（緯度経度）から住所を取得する（逆ジオコーディング）
+    private void getAddressFromLocation(LatLng latLng) {
+        Handler mainHandler = new Handler(Looper.getMainLooper());
+
+        executorService.execute(() -> {
+            Geocoder geocoder = new Geocoder(MokutekitiActivity.this, Locale.JAPAN);
+            String foundAddress = "指定した地点";
+            try {
+                // 座標から住所リストを取得
+                List<Address> addresses = geocoder.getFromLocation(latLng.latitude, latLng.longitude, 1);
+                if (addresses != null && !addresses.isEmpty()) {
+                    foundAddress = addresses.get(0).getAddressLine(0); // 住所文字列を取得
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+
+            String finalAddress = foundAddress;
+            // UIスレッドに戻ってピンを更新
+            mainHandler.post(() -> {
+                currentAddressName = finalAddress;
+                placeOrMoveMarker(latLng);
+            });
+        });
+    }
+
+    // 現在地表示を有効にする処理
+    private void enableMyLocation() {
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+                != PackageManager.PERMISSION_GRANTED &&
+                ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION)
+                        != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        mMap.setMyLocationEnabled(true); // 青い点を表示
+
+        // 現在地を取得してカメラを移動
+        fusedLocationClient.getLastLocation().addOnSuccessListener(this, location -> {
+            if (location != null) {
+                LatLng currentLatLng = new LatLng(location.getLatitude(), location.getLongitude());
+                mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(currentLatLng, 15));
+            }
+        });
+    }
+
+    // 指定した座標にマーカー（ピン）を立てる、または移動する
+    private void placeOrMoveMarker(LatLng latLng) {
+        if (mMap == null) return;
+        if (currentMarker != null) {
+            // 既にマーカーがある場合は位置だけ変える（エコ）
+            currentMarker.setPosition(latLng);
+        } else {
+            // 新しくマーカーを作る
+            MarkerOptions options = new MarkerOptions()
+                    .position(latLng)
+                    .title("目的地");
+            currentMarker = mMap.addMarker(options);
+        }
+        // マーカーの吹き出し（タイトル）を更新して表示
+        if(currentMarker != null) {
+            currentMarker.setTitle(currentAddressName);
+            currentMarker.showInfoWindow();
+        }
+    }
+
+    // ==========================================
+    // 4. データ保存・ダイアログ (ユーティリティ)
+    // ==========================================
+
+    // 「ここを目的地にしますか？」の確認ダイアログ
+    private void showConfirmDialog() {
+        if (currentMarker == null) {
+            Toast.makeText(this, "目的地を指定してください", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("冒険の目的地")
+                .setMessage("ここを目的地にしますか？")
+                .setPositiveButton("はい", (dialog, which) -> {
+                    LatLng position = currentMarker.getPosition();
+                    String saveName = (currentAddressName != null && !currentAddressName.isEmpty())
+                            ? currentAddressName : "指定した地点";
+
+                    // 履歴に保存
+                    saveAddressToHistory(saveName, position);
+
+                    // 次の画面（Caution）へ座標データを渡して移動
+                    Intent intent = new Intent(MokutekitiActivity.this, Caution.class);
+                    intent.putExtra("dest_lat", position.latitude);
+                    intent.putExtra("dest_lng", position.longitude);
+                    startActivity(intent);
+                    finish();
+                })
+                .setNegativeButton("いいえ", null)
+                .show();
+    }
+
+    // 履歴をSharedPreferences（スマホ内保存領域）に保存する処理
+    private void saveAddressToHistory(String address, LatLng latLng) {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        String json = prefs.getString(KEY_HISTORY_ADDR, "[]");
+        JSONArray oldArr;
+        try {
+            oldArr = new JSONArray(json);
+        } catch (JSONException e) {
+            oldArr = new JSONArray();
+        }
+
+        try {
+            JSONArray newArr = new JSONArray();
+            JSONObject entry = new JSONObject();
+            entry.put("address", address);
+            entry.put("lat", latLng.latitude);
+            entry.put("lng", latLng.longitude);
+
+            // 最新の履歴を一番上に追加
+            newArr.put(entry);
+
+            // 古い履歴を後ろに追加（重複チェック＆最大件数制限）
+            for (int i = 0; i < oldArr.length(); i++) {
+                JSONObject obj = oldArr.getJSONObject(i);
+                if (obj.optString("address").equals(address)) continue; // 同じ住所なら重複させない
+                if (newArr.length() >= MAX_HISTORY_RIREKI) break;       // 上限を超えたら保存しない
+                newArr.put(obj);
+            }
+            // 保存実行
+            prefs.edit().putString(KEY_HISTORY_ADDR, newArr.toString()).apply();
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
+    }
+
+    // 位置情報権限がない場合の誘導ダイアログ
+    private void showPermissionSettingsDialog() {
+        new AlertDialog.Builder(this)
+                .setTitle("位置情報の許可が必要です")
+                .setMessage("現在地を表示してナビゲーションを行うには、設定から位置情報の権限を「許可」してください。")
+                .setPositiveButton("設定画面へ", (dialog, which) -> {
+                    Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                    Uri uri = Uri.fromParts("package", getPackageName(), null);
+                    intent.setData(uri);
+                    startActivity(intent);
+                })
+                .show();
+    }
+}

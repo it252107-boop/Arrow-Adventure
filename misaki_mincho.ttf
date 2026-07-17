@@ -1,0 +1,117 @@
+package com.example.arrowadventureapp;
+
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.TextView;
+
+import androidx.annotation.NonNull;
+import androidx.recyclerview.widget.RecyclerView;
+
+import com.google.android.libraries.places.api.model.AutocompletePrediction;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * 検索候補（サジェスト）をリスト表示するためのアダプター。
+ * Google Places API から取得した予測データを、RecyclerViewに表示させます。
+ */
+public class SuggestAdapter extends RecyclerView.Adapter<SuggestAdapter.VH> {
+
+    // ==========================================
+    // 1. クリックイベント用のインターフェース
+    // ==========================================
+    /**
+     * リストの項目がクリックされた時の動作を定義するインターフェース。
+     * 具体的な処理（検索バーに文字を入れるなど）は Activity 側で記述します。
+     */
+    public interface OnItemClick {
+        void onClick(AutocompletePrediction item);
+    }
+
+    // 表示するデータのリスト（初期値は空）
+    private List<AutocompletePrediction> predictions = new ArrayList<>();
+
+    // クリック時の通知先
+    private final OnItemClick listener;
+
+    /**
+     * コンストラクタ
+     * @param listener クリックされた時に呼び出す処理
+     */
+    public SuggestAdapter(OnItemClick listener) {
+        this.listener = listener;
+    }
+
+    /**
+     * 新しい検索予測データのリストを受け取り、画面を更新するメソッド。
+     * 検索文字が変わるたびに呼び出されます。
+     */
+    public void setPredictions(List<AutocompletePrediction> predictions) {
+        this.predictions = predictions;
+        // データが変わったことをRecyclerViewに通知して、再描画させます
+        notifyDataSetChanged();
+    }
+
+    // ==========================================
+    // 2. 必須メソッドの実装
+    // ==========================================
+
+    /**
+     * 1行分のレイアウト（見た目）を作成する場所。
+     * ここではAndroid標準の「シンプルな1行テキスト」(`simple_list_item_1`)を使っています。
+     */
+    @NonNull
+    @Override
+    public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        View v = LayoutInflater.from(parent.getContext())
+                .inflate(android.R.layout.simple_list_item_1, parent, false);
+        return new VH(v);
+    }
+
+    /**
+     * 作成されたレイアウトに、実際のデータ（場所の名前）をセットする場所。
+     * スクロールするたびに何度も呼ばれます。
+     */
+    @Override
+    public void onBindViewHolder(@NonNull VH holder, int position) {
+        // 現在の行に対応するデータを取得
+        AutocompletePrediction item = predictions.get(position);
+
+        // メインの地名（例: "東京タワー"）をテキストビューにセット
+        // getPrimaryText(null) は、地名の主要部分だけを返します
+        holder.tv.setText(item.getPrimaryText(null));
+
+        // クリックされた時の処理をセット
+        holder.itemView.setOnClickListener(v -> {
+            if (listener != null) listener.onClick(item);
+        });
+    }
+
+    /**
+     * リストのデータ件数を返すメソッド。
+     * これがないと、RecyclerViewは何行表示していいかわかりません。
+     */
+    @Override
+    public int getItemCount() {
+        return predictions != null ? predictions.size() : 0;
+    }
+
+    // ==========================================
+    // 3. ViewHolder（ビューホルダー）クラス
+    // ==========================================
+    /**
+     * 行ごとのビュー（TextViewなど）を保持しておくクラス。
+     * これを使うことで、スクロール時の動作が高速になります。
+     */
+    static class VH extends RecyclerView.ViewHolder {
+        final TextView tv;
+
+        VH(@NonNull View itemView) {
+            super(itemView);
+            // android.R.layout.simple_list_item_1 に含まれるTextViewのIDは text1 です
+            tv = itemView.findViewById(android.R.id.text1);
+        }
+    }
+}

@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#DDDDDD"
+    android:orientation="vertical"
+    android:padding="16dp"
+    tools:context=".Caution">
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginTop="32dp"
+        android:layout_marginBottom="24dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <ImageView
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginEnd="16dp"
+            android:contentDescription="注意アイコン"
+            android:src="@android:drawable/ic_dialog_alert"
+            app:tint="#D32F2F" />
+
+        <TextView
+            android:id="@+id/Text1"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="注意"
+            android:letterSpacing="0.5"
+            android:fontFamily="@font/pixelmplus12regular"
+            android:textColor="@color/black"
+            android:textSize="50dp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <androidx.cardview.widget.CardView
+
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_marginBottom="10dp"
+            app:cardBackgroundColor="@color/white"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="8dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    android:id="@+id/Text2"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:drawableStart="@android:drawable/ic_delete"
+                    android:drawablePadding="20dp"
+                    android:gravity="center_vertical"
+                    android:text="歩きスマホはやめよう"
+                    android:fontFamily="@font/pixelmplus12regular"
+                    android:textColor="@color/black"
+                    android:textSize="28dp" />
+
+                <TextView
+                    android:id="@+id/Text3"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:drawableStart="@drawable/baseline_traffic_24"
+                    android:drawablePadding="20dp"
+                    android:gravity="center_vertical"
+                    android:text="信号を守ろう"
+                    android:drawableTint="#000000"
+                    android:fontFamily="@font/pixelmplus12regular"
+                    android:textColor="@color/black"
+                    android:textSize="30dp" />
+
+                <TextView
+                    android:id="@+id/Text4"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:drawableStart="@drawable/baseline_nightlight_24"
+                    android:drawablePadding="20dp"
+                    android:drawableTint="#3F51B5"
+                    android:gravity="center_vertical"
+                    android:text="暗い道は避けよう"
+                    android:fontFamily="@font/pixelmplus12regular"
+                    android:textColor="@color/black"
+                    android:textSize="30dp" />
+
+                <TextView
+                    android:id="@+id/Text5"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:drawableStart="@drawable/baseline_directions_run_24"
+                    android:drawablePadding="24dp"
+                    android:drawableTint="#999900"
+                    android:gravity="center_vertical"
+                    android:text="駅や階段での注意"
+                    android:fontFamily="@font/pixelmplus12regular"
+                    android:textColor="@color/black"
+                    android:textSize="30dp" />
+
+                <Button
+                    android:id="@+id/buttonok"
+                    android:layout_width="match_parent"
+                    android:layout_height="70dp"
+                    android:layout_marginTop="16dp"
+                    android:backgroundTint="#7B1FA2"
+                    android:text="了解"
+                    android:textColor="@color/white"
+                    android:letterSpacing="1"
+                    android:fontFamily="@font/pixelmplus12regular"
+                    android:textSize="24dp"
+                    android:textStyle="bold" />
+
+            </LinearLayout>
+        </androidx.cardview.widget.CardView>
+    </FrameLayout>
+
+</LinearLayout>

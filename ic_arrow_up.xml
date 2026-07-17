@@ -1,0 +1,78 @@
+package com.example.arrowadventureapp;
+
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.TextView;
+
+import androidx.annotation.NonNull;
+import androidx.recyclerview.widget.RecyclerView;
+
+import java.util.List;
+
+/**
+ * 履歴リストを表示するためのアダプタークラス。
+ * データ（HistoryItemのリスト）を受け取って、画面（RecyclerView）の各行に表示します。
+ */
+public class HistoryAdapter extends RecyclerView.Adapter<HistoryAdapter.VH> {
+
+    // クリックイベントを通知するためのインターフェース
+    // （アクティビティ側で「クリックされたらどうするか」を決めるために使います）
+    public interface OnItemClick {
+        void onClick(HistoryItem item);
+    }
+
+    private final List<HistoryItem> items; // 表示するデータのリスト
+    private final OnItemClick listener;    // クリックされた時のリスナー
+
+    // コンストラクタ：データとリスナーを受け取って保持します
+    public HistoryAdapter(List<HistoryItem> items, OnItemClick listener) {
+        this.items = items;
+        this.listener = listener;
+    }
+
+    // 1. 行（リストの1項目）のレイアウトを作成するメソッド
+    // 新しい行が必要になったときにだけ呼ばれます
+    @NonNull
+    @Override
+    public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        // Android標準のシンプルなレイアウト（simple_list_item_1）を使用
+        View v = LayoutInflater.from(parent.getContext())
+                .inflate(android.R.layout.simple_list_item_1, parent, false);
+        return new VH(v);
+    }
+
+    // 2. 作成された行に、具体的なデータをセットするメソッド
+    // スクロールするたびに何度も呼ばれます
+    @Override
+    public void onBindViewHolder(@NonNull VH holder, int position) {
+        // 現在の行に対応するデータを取得
+        HistoryItem it = items.get(position);
+
+        // 画面のテキストビューに住所を表示
+        holder.tv.setText(it.address); // full address (番地まで含めた文字列)
+
+        // 行全体がクリックされた時の処理
+        holder.itemView.setOnClickListener(v -> {
+            if (listener != null) listener.onClick(it); // アクティビティに通知
+        });
+    }
+
+    // 3. リスト全体の件数を返すメソッド
+    @Override
+    public int getItemCount() {
+        return items.size();
+    }
+
+    // ViewHolderクラス：行の中にあるView（部品）を保持しておく箱
+    // これを使うことで、スクロールのたびにfindViewByIdしなくて済むので高速になります
+    static class VH extends RecyclerView.ViewHolder {
+        final TextView tv;
+
+        VH(@NonNull View itemView) {
+            super(itemView);
+            // simple_list_item_1 に含まれている id:text1 のTextViewを取得
+            tv = itemView.findViewById(android.R.id.text1);
+        }
+    }
+}

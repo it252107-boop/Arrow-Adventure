@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/settei"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/navicolor"
+    android:padding="20dp">
+
+    <TextView
+        android:layout_marginTop="30dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="設定"
+        android:letterSpacing="0.5"
+        android:fontFamily="@font/pixelmplus12regular"
+        android:textSize="32sp"
+        android:textStyle="bold"
+        android:textColor="@color/textcolor"
+        android:gravity="center"
+        android:layout_marginBottom="10dp"/>
+
+    <View
+        android:id="@+id/myLine"
+        android:layout_width="match_parent"
+        android:layout_height="4dp"
+        android:background="@android:color/black"
+        android:layout_marginBottom="10dp"/>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="ダークモード切り替え"
+        android:fontFamily="@font/pixelmplus12regular"
+        android:textColor="@color/textcolor"
+        android:textSize="20sp"
+        android:layout_marginBottom="8dp"/>
+
+    <Button
+        android:id="@+id/dark"
+        android:layout_width="match_parent"
+        android:layout_height="60dp"
+        android:text="ダークモード切替"
+        android:fontFamily="@font/pixelmplus12regular"
+        android:textSize="30dp"
+        android:backgroundTint="@color/sen"
+        android:layout_marginBottom="10dp"/>
+
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="文字の大きさ"
+        android:fontFamily="@font/pixelmplus12regular"
+        android:textColor="@color/textcolor"
+        android:textSize="20sp"
+        android:layout_marginBottom="8dp"/>
+
+    <TextView
+        android:id="@+id/text_preview"
+        android:layout_width="match_parent"
+        android:layout_height="100dp"
+        android:text="あいうえお\nプレビュー"
+        android:fontFamily="@font/pixelmplus12regular"
+        android:gravity="center"
+        android:background="#EEEEEE"
+        android:textColor="#000000"
+        android:layout_marginBottom="16dp"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="24dp">
+
+        <Button
+            android:id="@+id/btn_size_small"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="小"
+            android:textSize="14sp"
+            android:fontFamily="@font/pixelmplus12regular"
+            android:layout_marginEnd="4dp"/>
+
+        <Button
+            android:id="@+id/btn_size_medium"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="中"
+            android:textSize="20sp"
+            android:fontFamily="@font/pixelmplus12regular"
+            android:layout_marginEnd="4dp"/>
+
+        <Button
+            android:id="@+id/btn_size_large"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="大"
+            android:textSize="32sp"
+            android:fontFamily="@font/pixelmplus12regular"/>
+    </LinearLayout>
+
+    <View
+        android:id="@+id/myLine2"
+        android:layout_width="match_parent"
+        android:layout_height="4dp"
+        android:background="@color/sen"
+        android:layout_marginBottom="20dp"/>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="ナビの文字の色"
+        android:fontFamily="@font/pixelmplus12regular"
+        android:textColor="@color/textcolor"
+        android:textSize="18sp"
+        android:layout_marginBottom="8dp"/>
+
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="32dp">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button android:id="@+id/btn_color_1" android:layout_width="50dp" android:layout_height="50dp" android:backgroundTint="#FFFFFF" android:layout_marginEnd="8dp"/>
+            <Button android:id="@+id/btn_color_2" android:layout_width="50dp" android:layout_height="50dp" android:backgroundTint="#000000" android:layout_marginEnd="8dp"/>
+            <Button android:id="@+id/btn_color_3" android:layout_width="50dp" android:layout_height="50dp" android:backgroundTint="#FF0000" android:layout_marginEnd="8dp"/>
+            <Button android:id="@+id/btn_color_4" android:layout_width="50dp" android:layout_height="50dp" android:backgroundTint="#0000FF" android:layout_marginEnd="8dp"/>
+            <Button android:id="@+id/btn_color_5" android:layout_width="50dp" android:layout_height="50dp" android:backgroundTint="#00FF00" android:layout_marginEnd="8dp"/>
+            <Button android:id="@+id/btn_color_6" android:layout_width="50dp" android:layout_height="50dp" android:backgroundTint="#FFFF00" android:layout_marginEnd="8dp"/>
+            <Button android:id="@+id/btn_color_7" android:layout_width="50dp" android:layout_height="50dp" android:backgroundTint="#00FFFF" />
+
+        </LinearLayout>
+    </HorizontalScrollView>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="4dp"
+        android:background="@color/sen"
+        android:layout_marginBottom="20dp"/>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="アプリについて"
+        android:fontFamily="@font/pixelmplus12regular"
+        android:textColor="@color/textcolor"
+        android:textSize="20sp"
+        android:layout_marginBottom="8dp"/>
+
+    <Button
+        android:id="@+id/btn_privacy"
+        android:layout_width="match_parent"
+        android:layout_height="60dp"
+        android:text="プライバシーポリシー"
+        android:fontFamily="@font/pixelmplus12regular"
+        android:textSize="24dp"
+        android:layout_marginBottom="10dp"/>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <Button
+        android:id="@+id/return2"
+        android:layout_width="match_parent"
+        android:layout_height="60dp"
+        android:text="戻る"
+        android:textColor="@color/white"
+        android:textSize="20dp"
+        android:backgroundTint="#546E7A"/>
+
+</LinearLayout>

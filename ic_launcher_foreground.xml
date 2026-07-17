@@ -1,0 +1,139 @@
+package com.example.arrowadventureapp;
+
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.graphics.Color;
+import android.os.Bundle;
+import android.view.View;
+import android.widget.Button;
+import android.widget.TextView;
+
+import androidx.activity.EdgeToEdge;
+import androidx.activity.OnBackPressedCallback;
+import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.app.AppCompatDelegate;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
+
+public class MainActivity extends AppCompatActivity {
+
+    // ==========================================
+    // 1. アプリ起動時の初期化処理
+    // ==========================================
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        // 画面をスマホの端まで広げる設定（EdgeToEdge）
+        EdgeToEdge.enable(this);
+        setContentView(R.layout.activity_main);
+
+        // --- 戻るボタンの無効化 ---
+        // メニュー画面なので、スマホの戻るボタンでアプリが終了しないように制御します。
+        // 「終了ボタン」を明示的に押させるための設計です。
+        getOnBackPressedDispatcher().addCallback(new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                // 何もしない（無効化）
+            }
+        });
+
+        // --- システムバー（時計やナビバー）との重なり防止 ---
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
+            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
+            return insets;
+        });
+
+        // --- 各ボタンのクリック動作設定 ---
+
+        // 「冒険を始める」ボタン -> 目的地選択画面へ
+        findViewById(R.id.buttonnavi).setOnClickListener(view -> {
+            Intent intent = new Intent(MainActivity.this, MokutekitiActivity.class);
+            startActivity(intent);
+            // ※ここは finish() しないことで、戻るボタンでメニューに帰ってこれるようにしています
+        });
+
+        // 「設定」ボタン -> 設定画面へ
+        findViewById(R.id.buttonsetting).setOnClickListener(view -> {
+            Intent intent = new Intent(MainActivity.this, Settei.class);
+            startActivity(intent);
+        });
+
+        // 「終了」ボタン -> 確認ダイアログを表示
+        findViewById(R.id.buttonend).setOnClickListener(view -> {
+            showExitConfirmationDialog();
+        });
+
+        // --- デザイン調整（ダークモード対応） ---
+        // 画面上の装飾線を取得
+        View myLine = findViewById(R.id.myLine);
+        View myLine1 = findViewById(R.id.myLine1);
+
+        // 現在のモード（ダーク/ライト）を取得
+        int mode = AppCompatDelegate.getDefaultNightMode();
+
+        // モードに応じて線の色を決定（ダークなら白、それ以外なら黒）
+        int lineColor = (mode == AppCompatDelegate.MODE_NIGHT_YES) ? Color.WHITE : Color.BLACK;
+
+        // 色を適用（Viewが存在する場合のみ）
+        if (myLine != null) myLine.setBackgroundColor(lineColor);
+        if (myLine1 != null) myLine1.setBackgroundColor(lineColor);
+    }
+
+    // ==========================================
+    // 2. アプリ終了確認ダイアログ
+    // ==========================================
+    private void showExitConfirmationDialog() {
+        new AlertDialog.Builder(this)
+                .setTitle("アプリケーションの終了")
+                .setMessage("本当にアプリケーションを終了してもよろしいですか？")
+                // 「はい」ならアプリを終了（finish）
+                .setPositiveButton("はい", (dialog, which) -> finish())
+                // 「いいえ」なら何もしない（ダイアログを閉じるだけ）
+                .setNegativeButton("いいえ", null)
+                .show();
+    }
+
+    // ==========================================
+    // 3. 画面が表示されるたびに実行される処理
+    // ==========================================
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // ここは「設定画面」から戻ってきた時にも呼ばれます。
+        // だから、文字サイズや色の変更を反映させるのに最適な場所です。
+
+        // --- 設定データの読み込み ---
+        SharedPreferences prefs = getSharedPreferences("AppSettings", MODE_PRIVATE);
+
+        // 保存されたサイズを取得（未設定なら50）
+        int size = prefs.getInt("textSize", 50);
+        // 保存された色を取得（未設定ならシアン）
+        int color = prefs.getInt("textColor", Color.parseColor("#00FFFF"));
+
+        // --- 各ボタンに設定を適用 ---
+        // 下で作った「共通メソッド」を使うことで、コードがスッキリしました
+        updateButtonAppearance(R.id.buttonnavi, size, color);
+        updateButtonAppearance(R.id.buttonsetting, size, color);
+        updateButtonAppearance(R.id.buttonend, size, color);
+    }
+
+    // ==========================================
+    // 4. ボタンの見た目を更新する便利メソッド
+    // ==========================================
+    /**
+     * ボタンのIDと設定値（サイズ・色）を受け取り、見た目を変更します。
+     * 同じ処理を何度も書かなくて済むように切り出しました。
+     */
+    private void updateButtonAppearance(int buttonId, int size, int color) {
+        Button btn = findViewById(buttonId);
+        // ボタンが見つかった場合だけ処理する（安全対策）
+        if (btn != null) {
+            btn.setTextSize(size);   // サイズ変更
+
+        }
+    }
+}

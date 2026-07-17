@@ -1,0 +1,22 @@
+package com.example.arrowadventureapp;
+
+public class Quest {
+    public String name;
+
+    public String id;
+    public double latitude;
+    public double longitude;
+    public String description;
+    public boolean isCleared = false; // クリアしたかどうか
+
+    // ★重要：Firebaseには「空のコンストラクタ」が絶対に必要です！
+    public Quest() {}
+
+    // データをセットしやすくするためのコンストラクタ
+    public Quest(String name, double latitude, double longitude, String description) {
+        this.name = name;
+        this.latitude = latitude;
+        this.longitude = longitude;
+        this.description = description;
+    }
+}

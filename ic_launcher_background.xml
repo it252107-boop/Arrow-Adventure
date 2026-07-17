@@ -1,0 +1,22 @@
+package com.example.arrowadventureapp;
+
+/**
+ * 履歴データ1件分を表すクラス。
+ * 「住所」と「場所（緯度・経度）」をセットにして持ち運ぶための「箱」です。
+ */
+public class HistoryItem {
+
+    // データの保存場所（フィールド）
+    // finalがついているので、一度セットしたら後から書き換えられない（安全！）
+    public final String address; // 住所の名前（例：「東京都港区芝公園4-2-8」）
+    public final double lat;     // 緯度
+    public final double lng;     // 経度
+
+    // コンストラクタ（この箱を作る時に最初に呼ばれるメソッド）
+    // ここでデータをセットして、箱を閉じます
+    public HistoryItem(String address, double lat, double lng) {
+        this.address = address;
+        this.lat = lat;
+        this.lng = lng;
+    }
+}

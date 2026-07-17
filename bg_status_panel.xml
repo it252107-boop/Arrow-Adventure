@@ -1,0 +1,55 @@
+package com.example.arrowadventureapp;
+
+import android.content.Intent;
+import android.os.Bundle;
+import androidx.activity.EdgeToEdge;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
+
+public class Caution extends AppCompatActivity {
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        // 1. アプリを全画面表示モード（EdgeToEdge）にする設定
+        EdgeToEdge.enable(this);
+        // レイアウトファイル（activity_caution.xml）を読み込んで表示
+        setContentView(R.layout.activity_caution);
+
+        // 2. スマホのシステムバー（上の時計や下のバー）と重ならないよう余白を調整
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
+            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
+            return insets;
+        });
+
+        // (戻るボタンの無効化処理を入れる場合はここに書く場所です)
+
+        // 3. 前の画面（目的地選択など）から送られてきた「緯度・経度」を受け取る
+        // "dest_lat" という名札がついたデータを取り出します（無ければ 0.0）
+        double lat = getIntent().getDoubleExtra("dest_lat", 0.0);
+        double lng = getIntent().getDoubleExtra("dest_lng", 0.0);
+
+        // 4. 「OKボタン（冒険を始める）」を押した時の処理
+        findViewById(R.id.buttonok).setOnClickListener(v -> {
+
+            // 次の画面「Navi（ナビゲーション）」へ移動する準備を作成
+            Intent intent = new Intent(Caution.this, Navi.class);
+
+            // ここで受け取った座標を、次のナビ画面へそのまま渡す（バケツリレー）
+            intent.putExtra("dest_lat", lat);
+            intent.putExtra("dest_lng", lng);
+
+            // いざ、ナビ画面を起動！
+            startActivity(intent);
+
+            // この「注意書き画面」はもう役目を終えたので閉じる
+            // (これをしないと、ナビ画面で戻るボタンを押した時にまたここに戻ってきてしまう)
+            finish();
+        });
+
+    }
+}

@@ -1,0 +1,50 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/navicolor"
+    android:padding="20dp">
+
+    <TextView
+        android:layout_marginTop="30dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="プライバシーポリシー"
+        android:fontFamily="sans-serif"
+        android:textSize="28sp"
+        android:textStyle="bold"
+        android:textColor="@color/textcolor"
+        android:gravity="center"
+        android:layout_marginBottom="20dp"/>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="#FFFFFF"
+        android:padding="16dp"
+        android:layout_marginBottom="20dp">
+
+        <TextView
+            android:id="@+id/text_policy_content"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:autoLink="web"
+            android:fontFamily="sans-serif"
+            android:lineSpacingExtra="6dp"
+            android:text="■プライバシーポリシー\n\n本アプリにおける利用者情報の取り扱いについて、以下の通り定めます。\n\n【1. 端末機能と情報の利用目的】\n(1) 位置情報\nナビゲーション機能および目的地までの距離・方角を算出するために、端末の位置情報（GPS等）を利用します。この情報はアプリ内でのみ処理され、外部サーバーへ送信されることはありません。\n\n(2) センサー情報（加速度・地磁気等）\nナビゲーション画面にて、矢印を正しい方角へ向ける等の演出を行うために、端末のモーションセンサー情報を利用します。\n\n(3) 端末内データ保存（履歴・設定）\n検索履歴、地図上のピン記録、およびアプリの設定情報は、お客様の利便性向上のため、端末内部の記憶領域（SharedPreferences等）に保存されます。これらは端末内にのみ保存され、外部へは送信されません。\n\n(4) その他機能\n操作フィードバック等のためにバイブレーション機能を利用します。\n\n----------------------------\n\n【2. 外部サービスの利用とデータ送信】\n（電気通信事業法に基づく表示）\n\n本アプリでは、ゲーム機能の提供およびデータの管理等のため、以下の第三者サービスを利用しています。\n\n■利用サービス：Firebase Firestore\n・提供者：Google LLC\n・利用目的：\n　1. クエストデータの受信・参照\n　2. クエストクリア情報の同期・管理\n・送信される情報の内容：\n　ゲームの進行状況（クエストクリアフラグ等）\n　※氏名、住所、電話番号、位置情報などの個人を特定できる情報は送信されません。\n\n----------------------------\n\n【3. 位置情報の設定について】\n位置情報の取得が許可されていない場合、アプリの機能が制限されます。その際は、アプリ内の案内ダイアログに従い、端末の設定画面にて権限を有効にしてください。\n\n============================\n\n■利用規約\n\nこの利用規約（以下「本規約」）は、本アプリの利用条件を定めるものです。\n\n第1条（権利の帰属）\n本アプリに含まれるプログラム、画像、データ、デザイン、その他一切のコンテンツに関する著作権、商標権、その他の知的財産権は、すべて「学校法人河合塾学園 トライデントコンピュータ専門学校」に帰属します。\n\n第2条（禁止事項）\n利用者は、本アプリの利用にあたり、以下の行為をしてはなりません。\n1. 法令または公序良俗に違反する行為\n2. 本アプリのプログラムを解析、改変、リバースエンジニアリングする行為\n3. 本アプリのサーバーやネットワーク機能に過度の負担をかける行為\n4. 権利者の許諾なく、本アプリを営利目的で利用する行為\n\n第3条（安全上の注意と自己責任）\n1. 本アプリは位置情報を利用しますが、歩行中や車両運転中のスマートフォンの操作（いわゆる「歩きスマホ」等）は大変危険です。必ず安全な場所に立ち止まってから操作してください。\n2. 本アプリの利用により発生した事故、怪我、トラブル、損害について、権利者および開発者は一切の責任を負いません。\n\n第4条（サービスの変更・中断）\n権利者は、利用者に事前に通知することなく、本アプリの内容を変更、または提供を中止することができるものとします。\n\n第5条（準拠法）\n本規約の解釈にあたっては、日本法を準拠法とします。\n\n============================\n\n■使用している技術・ライセンス\n\n・Google Maps SDK for Android\n・Google Places API\n・Android Jetpack (AndroidX)\n・Firebase Android SDK\n\nPowered by Google\n\n----------------------------\n\n■デザイン素材・権利について\n\n本アプリのデザインに使用している素材は、以下の通り権利関係が明確なものを使用しています。\n\n・使用フォント：PixelMplus\nhttps://itouhiro.hatenablog.com/entry/20130602/font\n（ライセンスフリー／商用利用可）\n\n・システム標準フォント (sans-serif)\n（Android SDK標準搭載／OS内蔵）\n\n・ダイアログ背景（写真AC）\nhttps://www.photo-ac.com/main/detail/2177394\n\n・メニュー背景（イラストAC）\nhttps://www.ac-illust.com/main/detail.php?id=23217380\n\n（各サイトの利用規約に基づき使用）"            android:textColor="#000000"
+            android:textSize="16sp" />
+    </ScrollView>
+
+    <Button
+        android:id="@+id/btn_policy_return"
+        android:layout_width="match_parent"
+        android:layout_height="60dp"
+        android:text="戻る"
+        android:textColor="@color/white"
+        android:fontFamily="@font/pixelmplus12regular"
+        android:textSize="20sp"
+        android:backgroundTint="#546E7A"/>
+
+</LinearLayout>
